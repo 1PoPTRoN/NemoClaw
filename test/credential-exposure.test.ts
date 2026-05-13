@@ -12,7 +12,11 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { describe, it, expect } from "vitest";
 import { buildSubprocessEnv as buildCliSubprocessEnv } from "../src/lib/subprocess-env";
-import { buildSubprocessEnv as buildPluginSubprocessEnv } from "../nemoclaw/src/lib/subprocess-env";
+import {
+  buildSubprocessEnv as buildPluginSubprocessEnv,
+  withLocalNoProxy as withPluginLocalNoProxy,
+} from "../nemoclaw/src/lib/subprocess-env";
+import { withLocalNoProxy as withCliLocalNoProxy } from "../src/lib/subprocess-env";
 import { getCurlTimingArgs } from "../src/lib/adapters/http/probe";
 
 const require = createRequire(import.meta.url);
@@ -139,6 +143,21 @@ describe("credential exposure in process arguments", () => {
           process.env[key] = value;
         }
       }
+    }
+  });
+
+  it("subprocess-env NO_PROXY local hosts are in sync for CLI and plugin", () => {
+    for (const withLocalNoProxy of [withCliLocalNoProxy, withPluginLocalNoProxy]) {
+      const env: Record<string, string> = {
+        HTTP_PROXY: "http://proxy.example.com:8888",
+        NO_PROXY: "corp.internal,localhost",
+        no_proxy: "corp.internal,localhost",
+      };
+
+      withLocalNoProxy(env);
+
+      expect(env.NO_PROXY).toBe("corp.internal,localhost,127.0.0.1,host.docker.internal,::1,0.0.0.0");
+      expect(env.no_proxy).toBe("corp.internal,localhost,127.0.0.1,host.docker.internal,::1,0.0.0.0");
     }
   });
 
