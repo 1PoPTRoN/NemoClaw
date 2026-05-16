@@ -9854,7 +9854,7 @@ const { createSandbox } = require(${onboardPath});
       "utf-8",
     );
     expect(NAME_ALLOWED_FORMAT).toBe(
-      "lowercase, starts with a letter, letters/numbers/internal hyphens only, ends with letter/number",
+      "1-63 characters, lowercase, starts with a letter, letters/numbers/internal hyphens only, ends with letter/number",
     );
     assert.match(source, /Sandbox name \(\$\{NAME_ALLOWED_FORMAT\}\)/);
   });
