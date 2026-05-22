@@ -376,7 +376,7 @@ Existing sandboxes do not auto-upgrade when a newer NemoClaw release ships a new
 ```console
 $ nemoclaw my-assistant status
 ...
-    Agent:    OpenClaw v2026.4.24
+    Agent:    OpenClaw v2026.5.18
 ...
 ```
 

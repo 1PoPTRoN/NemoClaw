@@ -56,7 +56,7 @@ OLD_NEMOCLAW_REF="${NEMOCLAW_OLD_NEMOCLAW_REF:-v0.0.36}"
 OLD_OPENSHELL_VERSION="${NEMOCLAW_OLD_OPENSHELL_VERSION:-0.0.36}"
 OLD_SANDBOX_BASE_IMAGE_REF="${NEMOCLAW_OLD_SANDBOX_BASE_IMAGE_REF:-ghcr.io/nvidia/nemoclaw/sandbox-base@sha256:104151ffadc2ff0b6c815e3c95c2783ced61aee0d0f83fc327cc02be9b7e14e6}"
 OLD_OPENCLAW_VERSION="${NEMOCLAW_OLD_OPENCLAW_VERSION:-2026.4.24}"
-CURRENT_OPENSHELL_VERSION="${NEMOCLAW_CURRENT_OPENSHELL_VERSION:-0.0.39}"
+CURRENT_OPENSHELL_VERSION="${NEMOCLAW_CURRENT_OPENSHELL_VERSION:-0.0.44}"
 SURVIVOR_SANDBOX="${NEMOCLAW_GATEWAY_UPGRADE_SURVIVOR_NAME:-e2e-gateway-upgrade-survivor}"
 SURVIVOR_MARKER="gateway-upgrade-survivor-$(date +%s)"
 SURVIVOR_MARKER_PATH="/sandbox/.openclaw/workspace/nemoclaw-gateway-upgrade-marker"
@@ -218,7 +218,7 @@ EOF
 # request-body-credential-rewrite
 # websocket-credential-rewrite
 if [ "${1:-}" = "--version" ]; then
-  printf 'openshell 0.0.39\n'
+  printf 'openshell 0.0.44\n'
   exit 0
 fi
 exit 99
@@ -308,7 +308,7 @@ EOF
 # request-body-credential-rewrite
 # websocket-credential-rewrite
 if [ "${1:-}" = "--version" ]; then
-  printf 'openshell 0.0.39\n'
+  printf 'openshell 0.0.44\n'
   exit 0
 fi
 exit 99
@@ -607,7 +607,8 @@ AGENT
 
 install_current_nemoclaw_upgrade() {
   local current_ref
-  current_ref="${GITHUB_SHA:-$(git rev-parse HEAD)}"
+  current_ref="${NEMOCLAW_CURRENT_NEMOCLAW_REF:-$(git rev-parse HEAD 2>/dev/null || printf '%s' "${GITHUB_SHA:-}")}"
+  [ -n "$current_ref" ] || fail "could not determine current NemoClaw ref"
   run_installer_payload "current ${current_ref:0:12}" "$current_ref" "${REPO_ROOT}/scripts/install.sh" "$CURRENT_INSTALL_LOG"
   grep -Fq "Accepted experimental OpenShell gateway upgrade" "$CURRENT_INSTALL_LOG" \
     || fail "current installer did not exercise the experimental OpenShell gateway upgrade acceptance path"

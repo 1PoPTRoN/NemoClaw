@@ -187,7 +187,7 @@ function loadPresetForSandbox(sandboxName: string, presetName: string): string |
  */
 function getPresetEndpoints(content: string): string[] {
   const hosts: string[] = [];
-  const regex = /host:\s*([^\s,}]+)/g;
+  const regex = /^[ \t]*(?:-[ \t]*)?host:[ \t]*([^#\s,}]+)/gm;
   let match;
   while ((match = regex.exec(content)) !== null) {
     hosts.push(match[1].replace(/^["']|["']$/g, ""));
