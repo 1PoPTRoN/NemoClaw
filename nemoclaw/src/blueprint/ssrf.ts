@@ -4,11 +4,11 @@
 import { promises as dnsPromises } from "node:dns";
 import { isIP } from "node:net";
 
-import { isPrivateIp, isPrivateHostname } from "./private-networks.js";
+import { isPrivateHostname, isPrivateIp } from "./private-networks.js";
 
 // Re-export so consumers can pick the narrower IP-only check (for
 // post-DNS addresses) or the broader name-aware check (for user input).
-export { isPrivateIp, isPrivateHostname };
+export { isPrivateHostname, isPrivateIp };
 
 const ALLOWED_SCHEMES = new Set(["https:", "http:"]);
 
@@ -24,13 +24,19 @@ function hostnameForDnsLookup(hostname: string): string {
  * DNS rebinding TOCTOU attacks where an attacker returns a public IP at
  * validation time and a private IP at connection time.
  *
- * Callers should use `pinnedUrl` for HTTP endpoints (full protection) and `url`
- * for HTTPS endpoints (TLS certificate validation prevents rebinding since the
- * attacker cannot present a valid cert for the rebinding target).
+ * Callers must use `pinnedUrl` unless their transport can pin the connection IP
+ * while still sending the original hostname as TLS SNI and the HTTP Host header.
+ * Reusing `url` for DNS-backed HTTPS endpoints reopens the validation-to-connect
+ * rebinding window.
  */
 export interface ValidatedEndpoint {
   url: string;
   pinnedUrl: string;
+  protocol: "http:" | "https:";
+  hostname: string;
+  resolvedAddress?: string;
+  resolvedFamily?: number;
+  dnsResolved: boolean;
 }
 
 export async function validateEndpointUrl(url: string): Promise<ValidatedEndpoint> {
@@ -61,7 +67,13 @@ export async function validateEndpointUrl(url: string): Promise<ValidatedEndpoin
 
   const lookupHostname = hostnameForDnsLookup(hostname);
   if (isIP(lookupHostname)) {
-    return { url, pinnedUrl: url };
+    return {
+      url,
+      pinnedUrl: url,
+      protocol: parsed.protocol as "http:" | "https:",
+      hostname,
+      dnsResolved: false,
+    };
   }
 
   let addresses: Array<{ address: string; family: number }>;
@@ -89,5 +101,13 @@ export async function validateEndpointUrl(url: string): Promise<ValidatedEndpoin
   const first = addresses[0];
   pinned.hostname = first.family === 6 ? `[${first.address}]` : first.address;
 
-  return { url, pinnedUrl: pinned.toString() };
+  return {
+    url,
+    pinnedUrl: pinned.toString(),
+    protocol: parsed.protocol as "http:" | "https:",
+    hostname,
+    resolvedAddress: first.address,
+    resolvedFamily: first.family,
+    dnsResolved: true,
+  };
 }

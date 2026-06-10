@@ -3,7 +3,7 @@
 
 // Tests for SSRF validation (PSIRT bug 6002763).
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 type LookupResult = Array<{ address: string; family: number }>;
 const mockLookup = vi.fn<(hostname: string, options: { all: true }) => Promise<LookupResult>>();
@@ -98,6 +98,13 @@ describe("validateEndpointUrl", () => {
     const result = await validateEndpointUrl("https://api.nvidia.com/v1");
     expect(result.url).toBe("https://api.nvidia.com/v1");
     expect(result.pinnedUrl).toBe("https://93.184.216.34/v1");
+    expect(result).toMatchObject({
+      protocol: "https:",
+      hostname: "api.nvidia.com",
+      resolvedAddress: "93.184.216.34",
+      resolvedFamily: 4,
+      dnsResolved: true,
+    });
   });
 
   it("allows http", async () => {
@@ -113,6 +120,11 @@ describe("validateEndpointUrl", () => {
     const result = await validateEndpointUrl("https://93.184.216.34/v1");
     expect(result.url).toBe("https://93.184.216.34/v1");
     expect(result.pinnedUrl).toBe("https://93.184.216.34/v1");
+    expect(result).toMatchObject({
+      protocol: "https:",
+      hostname: "93.184.216.34",
+      dnsResolved: false,
+    });
     expect(mockLookup).not.toHaveBeenCalled();
   });
 
@@ -122,6 +134,7 @@ describe("validateEndpointUrl", () => {
     const result = await validateEndpointUrl("https://[2606:4700:4700::1111]/v1");
     expect(result.url).toBe("https://[2606:4700:4700::1111]/v1");
     expect(result.pinnedUrl).toBe("https://[2606:4700:4700::1111]/v1");
+    expect(result.dnsResolved).toBe(false);
     expect(mockLookup).not.toHaveBeenCalled();
   });
 
@@ -344,6 +357,8 @@ describe("validateEndpointUrl – DNS pinning", () => {
     mockPublicDns();
     const result = await validateEndpointUrl("https://api.example.com/v1");
     expect(result.pinnedUrl).toBe("https://93.184.216.34/v1");
+    expect(result.dnsResolved).toBe(true);
+    expect(result.resolvedAddress).toBe("93.184.216.34");
   });
 
   it("pins IPv6 address with brackets", async () => {

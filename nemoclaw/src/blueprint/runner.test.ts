@@ -1,196 +1,64 @@
 // SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import type fs from "node:fs";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import YAML from "yaml";
 
-// ── In-memory filesystem ────────────────────────────────────────
+import {
+  addDir,
+  addFile,
+  blueprintWithPolicyAdditions,
+  capturedJsonOutput,
+  captureStdout,
+  FAKE_HOME,
+  makeValidatedEndpoint,
+  minimalBlueprint,
+  mockCurrentPolicy,
+  mockEnsureHttpsPinProxyRoutes,
+  mockExeca,
+  routedBlueprint,
+  seedBlueprintFile,
+  stdoutChunks,
+  stdoutText,
+  store,
+} from "./runner-test-harness.js";
 
-interface FsEntry {
-  type: "file" | "dir";
-  content?: string;
-}
+vi.mock("node:os", () => ({ homedir: () => "/fakehome" }));
 
-const store = new Map<string, FsEntry>();
-
-function addFile(p: string, content: string): void {
-  store.set(p, { type: "file", content });
-}
-
-function addDir(p: string): void {
-  store.set(p, { type: "dir" });
-}
-
-const FAKE_HOME = "/fakehome";
-
-vi.mock("node:os", () => ({
-  homedir: () => FAKE_HOME,
-}));
-
-vi.mock("node:crypto", () => ({
+vi.mock("node:crypto", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:crypto")>()),
   randomUUID: () => "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
 }));
 
 vi.mock("node:fs", async (importOriginal) => {
-  const original = await importOriginal<typeof fs>();
-  return {
-    ...original,
-    existsSync: (p: string) => store.has(p),
-    mkdirSync: vi.fn((p: string) => {
-      addDir(p);
-    }),
-    readFileSync: (p: string) => {
-      const entry = store.get(p);
-      if (entry?.type !== "file") throw new Error(`ENOENT: ${p}`);
-      return entry.content ?? "";
-    },
-    writeFileSync: vi.fn((p: string, data: string) => {
-      store.set(p, { type: "file", content: data });
-    }),
-    readdirSync: (p: string) => {
-      const prefix = p.endsWith("/") ? p : p + "/";
-      const entries = new Set<string>();
-      for (const k of store.keys()) {
-        if (k.startsWith(prefix)) {
-          const rest = k.slice(prefix.length);
-          const first = rest.split("/")[0];
-          if (first) entries.add(first);
-        }
-      }
-      if (entries.size === 0 && !store.has(p)) {
-        throw new Error(`ENOENT: ${p}`);
-      }
-      return [...entries].sort();
-    },
-  };
+  const { fsMock } = await import("./runner-test-harness.js");
+  return fsMock(await importOriginal<typeof import("node:fs")>());
 });
 
-const mockExeca = vi.fn();
 vi.mock("execa", () => ({
-  execa: (...args: unknown[]) => mockExeca(...args),
+  execa: async (...args: unknown[]) =>
+    (await import("./runner-test-harness.js")).mockExeca(...args),
 }));
 
 vi.mock("./ssrf.js", () => ({
-  validateEndpointUrl: vi.fn(async (url: string) => ({ url, pinnedUrl: url })),
+  validateEndpointUrl: vi.fn(async (url: string) =>
+    (await import("./runner-test-harness.js")).makeValidatedEndpoint(url),
+  ),
 }));
+
+vi.mock("./https-pin-proxy.js", async (importOriginal) => {
+  const { mockEnsureHttpsPinProxyRoutes: mock } = await import("./runner-test-harness.js");
+  return {
+    ...(await importOriginal<typeof import("./https-pin-proxy.js")>()),
+    ensureHttpsPinProxyRoutes: mock,
+  };
+});
 
 const { validateEndpointUrl } = await import("./ssrf.js");
 const mockedValidateEndpoint = vi.mocked(validateEndpointUrl);
 
 const { emitRunId, loadBlueprint, actionPlan, actionApply, actionStatus, actionRollback, main } =
   await import("./runner.js");
-
-// ── Helpers ─────────────────────────────────────────────────────
-
-const stdoutChunks: string[] = [];
-
-function captureStdout(): void {
-  vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
-    stdoutChunks.push(String(chunk));
-    return true;
-  });
-}
-
-function stdoutText(): string {
-  return stdoutChunks.join("");
-}
-
-function capturedJsonOutput<T = unknown>(): T {
-  const json = stdoutText()
-    .split("\n")
-    .filter((line) => line && !line.startsWith("RUN_ID:") && !line.startsWith("PROGRESS:"))
-    .join("\n");
-  return JSON.parse(json) as T;
-}
-
-function minimalBlueprint(overrides?: Record<string, unknown>): Record<string, unknown> {
-  return {
-    version: "1.0",
-    components: {
-      inference: {
-        profiles: {
-          default: {
-            provider_type: "openai",
-            provider_name: "my-provider",
-            endpoint: "https://api.example.com/v1",
-            model: "gpt-4",
-            credential_env: "MY_API_KEY",
-          },
-        },
-      },
-      sandbox: {
-        image: "openclaw",
-        name: "test-sandbox",
-        forward_ports: [18789],
-      },
-      policy: { additions: {} },
-    },
-    ...overrides,
-  };
-}
-
-function routedBlueprint(): Record<string, unknown> {
-  return {
-    version: "1.0",
-    components: {
-      inference: {
-        profiles: {
-          routed: {
-            provider_type: "openai",
-            provider_name: "nvidia-router",
-            endpoint: "http://localhost:4000/v1",
-            model: "routed",
-            credential_env: "NVIDIA_INFERENCE_API_KEY",
-            credential_default: "router-local",
-            timeout_secs: 180,
-          },
-        },
-      },
-      sandbox: {
-        image: "openclaw",
-        name: "test-sandbox",
-        forward_ports: [18789],
-      },
-      router: {
-        enabled: true,
-        port: 4000,
-        pool_config_path: "router/pool-config.yaml",
-      },
-      policy: { additions: {} },
-    },
-  };
-}
-
-function seedBlueprintFile(bp?: Record<string, unknown>): void {
-  addFile("blueprint.yaml", YAML.stringify(bp ?? minimalBlueprint()));
-}
-
-function blueprintWithPolicyAdditions(additions: Record<string, unknown>): Record<string, unknown> {
-  const bp = minimalBlueprint();
-  const components = bp.components as Record<string, unknown>;
-  return {
-    ...bp,
-    components: {
-      ...components,
-      policy: { additions },
-    },
-  };
-}
-
-function mockCurrentPolicy(stdout: string): void {
-  mockExeca.mockImplementation(async (_cmd: string, args: string[]) => {
-    if (
-      args[0] === "policy" &&
-      args[1] === "get" &&
-      args[2] === "--full" &&
-      args[3] === "test-sandbox"
-    ) {
-      return { exitCode: 0, stdout, stderr: "" };
-    }
-    return { exitCode: 0, stdout: "", stderr: "" };
-  });
-}
 
 // ── Tests ───────────────────────────────────────────────────────
 
@@ -558,10 +426,70 @@ describe("runner", () => {
       mockExeca.mockResolvedValue({ exitCode: 0 });
 
       const plan = await actionPlan("default", minimalBlueprint(), {
+        endpointUrl: "https://93.184.216.34/v1",
+      });
+      expect(plan.inference.endpoint).toBe("https://93.184.216.34/v1");
+      expect(mockedValidateEndpoint).toHaveBeenCalledWith("https://93.184.216.34/v1");
+    });
+
+    it("pins HTTP endpoint URL overrides to the validated IP", async () => {
+      captureStdout();
+      mockExeca.mockResolvedValue({ exitCode: 0 });
+      mockedValidateEndpoint.mockResolvedValueOnce(
+        makeValidatedEndpoint("http://override.example.com/v1", "http://93.184.216.34/v1"),
+      );
+
+      const plan = await actionPlan("default", minimalBlueprint(), {
+        endpointUrl: "http://override.example.com/v1",
+      });
+
+      expect(plan.inference.endpoint).toBe("http://93.184.216.34/v1");
+    });
+
+    it("routes DNS-backed HTTPS endpoint URL overrides through the pinning proxy", async () => {
+      captureStdout();
+      mockExeca.mockResolvedValue({ exitCode: 0 });
+      mockedValidateEndpoint.mockResolvedValueOnce(
+        makeValidatedEndpoint("https://override.example.com/v1", "https://93.184.216.34/v1"),
+      );
+
+      const plan = await actionPlan("default", minimalBlueprint(), {
         endpointUrl: "https://override.example.com/v1",
       });
-      expect(plan.inference.endpoint).toBe("https://override.example.com/v1");
-      expect(mockedValidateEndpoint).toHaveBeenCalledWith("https://override.example.com/v1");
+
+      expect(plan.inference.endpoint).toMatch(
+        /^http:\/\/127\.0\.0\.1:11437\/\.nemoclaw\/https-pin\/[a-f0-9]{24}\/v1$/,
+      );
+      expect(plan.inference.endpoint).not.toContain("override.example.com");
+      expect(mockEnsureHttpsPinProxyRoutes).not.toHaveBeenCalled();
+    });
+
+    it("routes provider DNS-backed HTTPS blueprint endpoints through the pinning proxy", async () => {
+      captureStdout();
+      mockExeca.mockResolvedValue({ exitCode: 0 });
+      mockedValidateEndpoint.mockResolvedValueOnce(
+        makeValidatedEndpoint("https://integrate.api.nvidia.com/v1", "https://93.184.216.34/v1"),
+      );
+
+      const bp = minimalBlueprint({
+        components: {
+          inference: {
+            profiles: {
+              trusted: {
+                provider_type: "nvidia",
+                endpoint: "https://integrate.api.nvidia.com/v1",
+                model: "nvidia/nemotron",
+              },
+            },
+          },
+          sandbox: { name: "sb" },
+        },
+      });
+
+      const plan = await actionPlan("trusted", bp);
+      expect(plan.inference.endpoint).toMatch(
+        /^http:\/\/127\.0\.0\.1:11437\/\.nemoclaw\/https-pin\/[a-f0-9]{24}\/v1$/,
+      );
     });
 
     it("SSRF-validates the blueprint-defined endpoint even without --endpoint-url override", async () => {
@@ -1081,9 +1009,38 @@ describe("runner", () => {
 
     it("validates and applies endpoint URL override", async () => {
       await actionApply("default", minimalBlueprint(), {
+        endpointUrl: "https://93.184.216.34/v1",
+      });
+      expect(mockedValidateEndpoint).toHaveBeenCalledWith("https://93.184.216.34/v1");
+    });
+
+    it("starts the HTTPS pinning proxy for DNS-backed endpoint URL overrides", async () => {
+      mockedValidateEndpoint.mockResolvedValueOnce(
+        makeValidatedEndpoint("https://override.example.com/v1", "https://93.184.216.34/v1"),
+      );
+
+      await actionApply("default", minimalBlueprint(), {
         endpointUrl: "https://override.example.com/v1",
       });
-      expect(mockedValidateEndpoint).toHaveBeenCalledWith("https://override.example.com/v1");
+
+      expect(mockEnsureHttpsPinProxyRoutes).toHaveBeenCalledTimes(1);
+      const routes = mockEnsureHttpsPinProxyRoutes.mock.calls[0][0];
+      expect(routes).toHaveLength(1);
+      expect(routes[0]).toMatchObject({
+        hostname: "override.example.com",
+        resolvedAddress: "93.184.216.34",
+      });
+
+      const providerCall = mockExeca.mock.calls.find(
+        (c) => Array.isArray(c[1]) && c[1].includes("provider"),
+      );
+      if (!providerCall) throw new Error("provider create call not found");
+      const configArg = (providerCall[1] as string[]).find((a: string) =>
+        a.startsWith("OPENAI_BASE_URL="),
+      );
+      expect(configArg).toMatch(
+        /^OPENAI_BASE_URL=http:\/\/127\.0\.0\.1:11437\/\.nemoclaw\/https-pin\/[a-f0-9]{24}\/v1$/,
+      );
     });
 
     it("passes --timeout when timeout_secs is set in profile", async () => {
@@ -1445,8 +1402,8 @@ describe("runner", () => {
     });
 
     it("parses apply with --profile and --endpoint-url", async () => {
-      await main(["apply", "--profile", "default", "--endpoint-url", "https://override.test/v1"]);
-      expect(mockedValidateEndpoint).toHaveBeenCalledWith("https://override.test/v1");
+      await main(["apply", "--profile", "default", "--endpoint-url", "https://93.184.216.34/v1"]);
+      expect(mockedValidateEndpoint).toHaveBeenCalledWith("https://93.184.216.34/v1");
       expect(stdoutText()).toContain("PROGRESS:100:Apply complete");
     });
 
@@ -1463,12 +1420,12 @@ describe("runner", () => {
         "default",
         "--dry-run",
         "--endpoint-url",
-        "https://ep.test",
+        "https://93.184.216.34/v1",
       ]);
       const out = stdoutText();
       expect(out).toContain('"dry_run": true');
-      expect(out).toContain('"endpoint": "https://ep.test"');
-      expect(mockedValidateEndpoint).toHaveBeenCalledWith("https://ep.test");
+      expect(out).toContain('"endpoint": "https://93.184.216.34/v1"');
+      expect(mockedValidateEndpoint).toHaveBeenCalledWith("https://93.184.216.34/v1");
     });
   });
 });

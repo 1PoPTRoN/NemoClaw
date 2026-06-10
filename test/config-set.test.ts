@@ -513,10 +513,10 @@ describe("config set helpers", () => {
       );
     });
 
-    it("preserves HTTPS hostnames after DNS validation", async () => {
+    it("rejects DNS-backed HTTPS URLs that cannot be transport-pinned", async () => {
       const lookup = async () => [{ address: "93.184.216.34", family: 4 }];
-      await expect(rewriteConfigUrlsWithDnsPinning("https://example.com/v1", lookup)).resolves.toBe(
-        "https://example.com/v1",
+      await expect(rewriteConfigUrlsWithDnsPinning("https://example.com/v1", lookup)).rejects.toThrow(
+        /cannot safely persist/i,
       );
     });
 
@@ -526,7 +526,7 @@ describe("config set helpers", () => {
         rewriteConfigUrlsWithDnsPinning(
           {
             primary: "http://api.example.com/v1",
-            secure: "https://secure.example.com/v1",
+            secure: "https://93.184.216.35/v1",
             label: "production",
             fallbacks: ["http://backup.example.com/v2"],
           },
@@ -534,7 +534,7 @@ describe("config set helpers", () => {
         ),
       ).resolves.toEqual({
         primary: "http://93.184.216.34/v1",
-        secure: "https://secure.example.com/v1",
+        secure: "https://93.184.216.35/v1",
         label: "production",
         fallbacks: ["http://93.184.216.34/v2"],
       });

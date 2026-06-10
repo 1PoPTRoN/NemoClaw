@@ -13,16 +13,20 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, sep } from "node:path";
 
 import { execa } from "execa";
 import YAML from "yaml";
-
-import { validateEndpointUrl } from "./ssrf.js";
-import { buildSubprocessEnv } from "../lib/subprocess-env.js";
 import { DASHBOARD_PORT } from "../lib/ports.js";
+import { buildSubprocessEnv } from "../lib/subprocess-env.js";
+import {
+  endpointForValidatedEndpoint,
+  ensureHttpsPinProxyRoutes,
+  type HttpsPinProxyRoute,
+} from "./https-pin-proxy.js";
+import { validateEndpointUrl } from "./ssrf.js";
 
 type Action = "plan" | "apply" | "status" | "rollback";
 
@@ -422,6 +426,7 @@ async function resolveRunConfig(
   inferenceCfg: InferenceProfile;
   sandboxCfg: SandboxConfig;
   routerCfg: RouterConfig;
+  httpsPinProxyRoutes: HttpsPinProxyRoute[];
 }> {
   const inferenceProfiles = blueprint.components?.inference?.profiles ?? {};
   if (!(profile in inferenceProfiles)) {
@@ -430,25 +435,20 @@ async function resolveRunConfig(
   }
 
   let inferenceCfg = { ...inferenceProfiles[profile] };
-  if (endpointUrl) {
-    const validated = await validateEndpointUrl(endpointUrl);
-    // Use DNS-pinned URL for HTTP (full SSRF/rebinding protection). For HTTPS,
-    // keep the original hostname — TLS certificate validation prevents rebinding
-    // since the attacker cannot present a valid cert for the target.
-    const safe = endpointUrl.startsWith("https:") ? validated.url : validated.pinnedUrl;
-    inferenceCfg = { ...inferenceCfg, endpoint: safe };
-  }
-
-  // Validate the final endpoint (whether from CLI override or blueprint profile)
-  if (inferenceCfg.endpoint) {
-    const validated = await validateEndpointUrl(inferenceCfg.endpoint);
-    const safe = inferenceCfg.endpoint.startsWith("https:") ? validated.url : validated.pinnedUrl;
-    inferenceCfg = { ...inferenceCfg, endpoint: safe };
+  const httpsPinProxyRoutes: HttpsPinProxyRoute[] = [];
+  const rawEndpoint = endpointUrl ?? inferenceCfg.endpoint;
+  if (rawEndpoint) {
+    const validated = await validateEndpointUrl(rawEndpoint);
+    const safe = endpointForValidatedEndpoint(validated);
+    if (safe.httpsPinRoute) {
+      httpsPinProxyRoutes.push(safe.httpsPinRoute);
+    }
+    inferenceCfg = { ...inferenceCfg, endpoint: safe.endpoint };
   }
 
   const sandboxCfg = blueprint.components?.sandbox ?? {};
   const routerCfg = blueprint.components?.router ?? {};
-  return { inferenceProfiles, inferenceCfg, sandboxCfg, routerCfg };
+  return { inferenceProfiles, inferenceCfg, sandboxCfg, routerCfg, httpsPinProxyRoutes };
 }
 
 // ── Actions ─────────────────────────────────────────────────────
@@ -700,7 +700,7 @@ export async function actionApply(
 
   const rid = emitRunId();
 
-  const { inferenceCfg, sandboxCfg } = await resolveRunConfig(
+  const { inferenceCfg, sandboxCfg, httpsPinProxyRoutes } = await resolveRunConfig(
     profile,
     blueprint,
     options?.endpointUrl,
@@ -737,6 +737,7 @@ export async function actionApply(
   }
 
   progress(50, "Configuring inference provider");
+  await ensureHttpsPinProxyRoutes(httpsPinProxyRoutes);
   const providerName = inferenceCfg.provider_name ?? "default";
   const providerType = inferenceCfg.provider_type ?? "openai";
   const endpoint = inferenceCfg.endpoint ?? "";

@@ -83,6 +83,9 @@ interface DnsValidatedUrl {
   protocol: "http:" | "https:";
   originalUrl: string;
   pinnedUrl: string;
+  hostname: string;
+  resolvedAddress?: string;
+  dnsResolved: boolean;
 }
 
 type ManagedGatewayRestart = (sandboxName: string) => { ok: boolean };
@@ -668,7 +671,13 @@ async function validateUrlValueWithDnsResult(
   assertPublicHost(hostname);
   const lookupHostname = hostnameForDnsLookup(hostname);
   if (isIP(lookupHostname)) {
-    return { protocol: parsed.protocol as "http:" | "https:", originalUrl, pinnedUrl: originalUrl };
+    return {
+      protocol: parsed.protocol as "http:" | "https:",
+      originalUrl,
+      pinnedUrl: originalUrl,
+      hostname,
+      dnsResolved: false,
+    };
   }
 
   let addresses: Array<{ address: string; family?: number }>;
@@ -701,6 +710,9 @@ async function validateUrlValueWithDnsResult(
     protocol: parsed.protocol as "http:" | "https:",
     originalUrl,
     pinnedUrl: pinned.toString(),
+    hostname,
+    resolvedAddress: first.address,
+    dnsResolved: true,
   };
 }
 
@@ -747,6 +759,23 @@ function formatConfigValueForLogs(value: ConfigValue | undefined): string {
   return JSON.stringify(redactConfigValueForPreview(value));
 }
 
+function rewriteValidatedConfigUrl(validated: DnsValidatedUrl): string {
+  if (validated.protocol === "http:") {
+    return validated.pinnedUrl;
+  }
+
+  if (!validated.dnsResolved) {
+    return validated.originalUrl;
+  }
+
+  const resolved = validated.resolvedAddress ? ` (validated IP: ${validated.resolvedAddress})` : "";
+  throw new Error(
+    `HTTPS URL host "${validated.hostname}" resolves through DNS${resolved}. ` +
+      "NemoClaw cannot safely persist it without connection-IP pinning and TLS SNI/Host " +
+      "preservation. Use an IP-literal URL or a local proxy that pins DNS safely.",
+  );
+}
+
 async function rewriteConfigUrlsWithDnsPinning(
   value: ConfigValue,
   lookup: LookupFn = dnsPromises.lookup as LookupFn,
@@ -759,11 +788,7 @@ async function rewriteConfigUrlsWithDnsPinning(
     try {
       const validated = await validateUrlValueWithDnsResult(trimmed, lookup);
       if (!validated) return value;
-      // HTTP has no TLS hostname binding, so persist the DNS-pinned URL to avoid
-      // a config-time/public → runtime/private DNS-rebinding window. For HTTPS,
-      // preserve the original hostname so normal certificate validation still
-      // protects the connection.
-      return validated.protocol === "http:" ? validated.pinnedUrl : validated.originalUrl;
+      return rewriteValidatedConfigUrl(validated);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       throw new ConfigUrlValidationError(trimmed, message);
@@ -972,9 +997,9 @@ async function configSet(sandboxName: string, opts: ConfigSetOpts = {}): Promise
     }
   }
 
-  // Validate URLs for SSRF (supports nested object/array values). HTTP URLs
-  // are persisted with DNS-pinned hosts so later use cannot re-resolve the same
-  // hostname to private/internal space after config-time validation succeeds.
+  // Validate URLs for SSRF (supports nested object/array values). HTTP URLs are
+  // persisted with DNS-pinned hosts. DNS-backed HTTPS URLs need SNI/Host-aware
+  // pinning, which generic config persistence cannot attach.
   let safeValue: ConfigValue;
   try {
     safeValue = await rewriteConfigUrlsWithDnsPinning(parsedValue);

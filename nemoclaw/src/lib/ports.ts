@@ -4,7 +4,7 @@
 /**
  * Dashboard port parsing for the NemoClaw plugin.
  * Mirrors the parsePort() logic from src/lib/ports.ts in the CLI.
- * Only DASHBOARD_PORT is needed by the plugin (runner.ts).
+ * Keep this small and explicit for the plugin-side runner.
  */
 
 export function parsePort(envVar: string, fallback: number): number {
@@ -22,3 +22,4 @@ export function parsePort(envVar: string, fallback: number): number {
 }
 
 export const DASHBOARD_PORT = parsePort("NEMOCLAW_DASHBOARD_PORT", 18789);
+export const HTTPS_PIN_PROXY_PORT = parsePort("NEMOCLAW_HTTPS_PIN_PROXY_PORT", 11437);
