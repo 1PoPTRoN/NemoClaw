@@ -515,9 +515,9 @@ describe("config set helpers", () => {
 
     it("rejects DNS-backed HTTPS URLs that cannot be transport-pinned", async () => {
       const lookup = async () => [{ address: "93.184.216.34", family: 4 }];
-      await expect(rewriteConfigUrlsWithDnsPinning("https://example.com/v1", lookup)).rejects.toThrow(
-        /cannot safely persist/i,
-      );
+      await expect(
+        rewriteConfigUrlsWithDnsPinning("https://example.com/v1", lookup),
+      ).rejects.toThrow(/cannot safely persist/i);
     });
 
     it("recursively rewrites nested HTTP URLs and leaves non-URLs unchanged", async () => {
