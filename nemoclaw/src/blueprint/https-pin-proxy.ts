@@ -382,6 +382,8 @@ function handleProxyRequest(req: IncomingMessage, res: ServerResponse): void {
   }
 
   const upstreamPath = requestPathForRoute(route, requestUrl);
+  // lgtm[js/file-access-to-http] Routes are persisted under a 0700 state dir and
+  // revalidated as public IPs before use; TLS identity remains bound to hostname.
   const upstream = https.request(
     buildPinnedHttpsRequestOptions({
       route,
