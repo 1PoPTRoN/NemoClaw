@@ -52,13 +52,7 @@ vi.mock("node:https", async (importOriginal) => {
       return req;
     };
     setImmediate(() => {
-      if (upstreamState.behavior === "error") {
-        req.emit("error", new Error("ECONNREFUSED"));
-      } else if (upstreamState.behavior === "timeout") {
-        req._onTimeout?.();
-      } else if (upstreamState.behavior === "hang") {
-        // Intentionally never responds.
-      } else {
+      const emitSuccess = () => {
         const res = new PassThrough() as PassThrough & {
           statusCode?: number;
           headers?: Record<string, string>;
@@ -71,7 +65,17 @@ vi.mock("node:https", async (importOriginal) => {
         };
         cb?.(res);
         res.end('{"ok":true}');
-      }
+      };
+      // Dispatch table keeps the mock branch-free so the test stays linear.
+      const behaviors: Record<typeof upstreamState.behavior, () => void> = {
+        error: () => req.emit("error", new Error("ECONNREFUSED")),
+        timeout: () => req._onTimeout?.(),
+        hang: () => {
+          // Intentionally never responds.
+        },
+        success: emitSuccess,
+      };
+      behaviors[upstreamState.behavior]();
     });
     return req;
   };
