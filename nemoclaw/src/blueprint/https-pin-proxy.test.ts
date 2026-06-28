@@ -169,6 +169,13 @@ function writeRoute(route: HttpsPinProxyRoute): void {
   );
 }
 
+// Persist arbitrary (possibly malformed) route state to exercise the strict
+// validation in loadRoute/isPersistedRoute.
+function writeRawRoutes(routes: Record<string, unknown>): void {
+  mkdirSync(STATE_DIR, { recursive: true });
+  writeFileSync(ROUTES_PATH, JSON.stringify(routes));
+}
+
 const dnsRoute: HttpsPinProxyRoute = {
   id: "abcdef0123456789abcdef01",
   hostname: "api.example.com",
@@ -389,6 +396,49 @@ describe("proxy server", () => {
   });
 });
 
+describe("persisted route validation", () => {
+  const base: Record<string, unknown> = {
+    ...dnsRoute,
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  };
+
+  const tamperedCases: Array<[string, Record<string, unknown>]> = [
+    ["a non-IP resolvedAddress", { ...base, resolvedAddress: "api.example.com" }],
+    ["a zero port", { ...base, port: 0 }],
+    ["an out-of-range port", { ...base, port: 70000 }],
+    ["a non-integer port", { ...base, port: 443.5 }],
+    ["an invalid resolvedFamily", { ...base, resolvedFamily: 7 }],
+    ["a basePath without a leading slash", { ...base, basePath: "v1" }],
+    ["a baseSearch without a leading question mark", { ...base, baseSearch: "api-version=2" }],
+    ["a route id that does not match the lookup key", { ...base, id: "ffffffffffffffffffffffff" }],
+  ];
+
+  it.each(tamperedCases)("returns 404 without calling upstream for %s", async (_label, route) => {
+    writeRawRoutes({ [dnsRoute.id]: route });
+    const { port } = await startServer();
+    const res = await request(port, `${ROUTE_PREFIX}${dnsRoute.id}/v1/models`);
+    expect(res.status).toBe(404);
+    expect(upstreamState.lastOptions).toBeUndefined();
+  });
+
+  it("returns 404 without calling upstream for a malformed route id key", async () => {
+    writeRawRoutes({ "not-hex": { ...base, id: "not-hex" } });
+    const { port } = await startServer();
+    const res = await request(port, `${ROUTE_PREFIX}not-hex/v1`);
+    expect(res.status).toBe(404);
+    expect(upstreamState.lastOptions).toBeUndefined();
+  });
+
+  it("fails closed when routes.json is corrupt", async () => {
+    mkdirSync(STATE_DIR, { recursive: true });
+    writeFileSync(ROUTES_PATH, "{ this is not valid json");
+    const { port } = await startServer();
+    const res = await request(port, `${ROUTE_PREFIX}${dnsRoute.id}/v1`);
+    expect(res.status).toBe(404);
+    expect(upstreamState.lastOptions).toBeUndefined();
+  });
+});
+
 // ── Route registration & proxy lifecycle ────────────────────────
 
 describe("ensureHttpsPinProxyRoutes", () => {
@@ -419,6 +469,40 @@ describe("ensureHttpsPinProxyRoutes", () => {
       /did not become ready/,
     );
     expect(spawnMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("spawns the detached proxy with an allowlisted env that excludes parent secrets", async () => {
+    const secrets = {
+      GITHUB_TOKEN: "ghp_must_not_leak",
+      AWS_ACCESS_KEY_ID: "AKIA_MUST_NOT_LEAK",
+      NVIDIA_API_KEY: "nvapi-must-not-leak",
+      OPENAI_API_KEY: "sk-must-not-leak",
+    };
+    Object.assign(process.env, secrets);
+    try {
+      await expect(proxy.ensureHttpsPinProxyRoutes([dnsRoute])).rejects.toThrow(
+        /did not become ready/,
+      );
+      expect(spawnMock).toHaveBeenCalledTimes(1);
+
+      const [, , options] = spawnMock.mock.calls[0] as unknown as [
+        string,
+        string[],
+        { env: Record<string, string> },
+      ];
+      const spawnEnv = options.env;
+      // Parent-process secrets must not reach the detached proxy.
+      for (const key of Object.keys(secrets)) {
+        expect(spawnEnv).not.toHaveProperty(key);
+      }
+      // The proxy still receives the values it legitimately needs.
+      expect(spawnEnv.NEMOCLAW_HTTPS_PIN_PROXY_PORT).toBe(String(PROXY_PORT));
+      expect(spawnEnv.PATH).toBeDefined();
+    } finally {
+      for (const key of Object.keys(secrets)) {
+        delete process.env[key];
+      }
+    }
   });
 });
 

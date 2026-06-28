@@ -23,12 +23,14 @@ import http, {
   type ServerResponse,
 } from "node:http";
 import https, { type RequestOptions } from "node:https";
+import { isIP } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import tls, { type PeerCertificate } from "node:tls";
 import { fileURLToPath } from "node:url";
 
 import { HTTPS_PIN_PROXY_PORT } from "../lib/ports.js";
+import { buildSubprocessEnv } from "../lib/subprocess-env.js";
 import type { ValidatedEndpoint } from "./ssrf.js";
 import { isPrivateIp } from "./private-networks.js";
 
@@ -162,6 +164,8 @@ function readRoutes(): RouteMap {
       ? (parsed as RouteMap)
       : {};
   } catch {
+    // Unreadable or non-JSON state fails closed: with no routes, every request
+    // is treated as unregistered (404) and never reaches https.request.
     return {};
   }
 }
@@ -269,22 +273,67 @@ async function registerHttpsPinProxyRoute(route: HttpsPinProxyRoute): Promise<vo
   });
 }
 
+// Persisted routes are the source of truth for an SSRF defense, so every field
+// is revalidated before use. A corrupt or tampered routes.json must fail closed
+// (be treated as unregistered) rather than reach https.request with a non-IP
+// address that would be re-resolved through DNS, a malformed Host/SNI value, or
+// an out-of-range port.
+const ROUTE_ID_PATTERN = /^[a-f0-9]{24}$/;
+const SNI_HOSTNAME_PATTERN = /^[A-Za-z0-9._-]+$/;
+
+function isValidRouteId(value: unknown): value is string {
+  return typeof value === "string" && ROUTE_ID_PATTERN.test(value);
+}
+
+function isSafeSniHostname(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 253 &&
+    SNI_HOSTNAME_PATTERN.test(value)
+  );
+}
+
+function isValidPort(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 65535;
+}
+
+function isIpLiteral(value: unknown): value is string {
+  return typeof value === "string" && isIP(value) !== 0;
+}
+
+function isValidResolvedFamily(value: unknown): boolean {
+  return value === undefined || value === 4 || value === 6;
+}
+
+function isValidBasePath(value: unknown): value is string {
+  return typeof value === "string" && value.startsWith("/");
+}
+
+function isValidBaseSearch(value: unknown): value is string {
+  return typeof value === "string" && (value === "" || value.startsWith("?"));
+}
+
 function isPersistedRoute(value: unknown): value is PersistedRoute {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const route = value as Partial<PersistedRoute>;
+  // `resolvedAddress` must stay an IP literal so the connection cannot fall back
+  // to DNS resolution; the private-range recheck stays in handleProxyRequest.
   return (
-    typeof route.id === "string" &&
-    typeof route.hostname === "string" &&
-    typeof route.port === "number" &&
-    typeof route.basePath === "string" &&
-    typeof route.baseSearch === "string" &&
-    typeof route.resolvedAddress === "string"
+    isValidRouteId(route.id) &&
+    isSafeSniHostname(route.hostname) &&
+    isValidPort(route.port) &&
+    isValidBasePath(route.basePath) &&
+    isValidBaseSearch(route.baseSearch) &&
+    isIpLiteral(route.resolvedAddress) &&
+    isValidResolvedFamily(route.resolvedFamily)
   );
 }
 
 function loadRoute(routeId: string): PersistedRoute | null {
   const route = readRoutes()[routeId];
-  return isPersistedRoute(route) ? route : null;
+  if (!isPersistedRoute(route) || route.id !== routeId) return null;
+  return route;
 }
 
 function requestPathForRoute(route: PersistedRoute, requestUrl: URL): string {
@@ -481,10 +530,13 @@ function spawnProxyProcess(port = HTTPS_PIN_PROXY_PORT): void {
   try {
     const child = spawn(process.execPath, [modulePath, "serve"], {
       detached: true,
-      env: {
-        ...process.env,
+      // Do not inherit the full parent environment. The runner holds provider
+      // API keys and cloud/GitHub tokens that this detached, long-lived proxy
+      // never needs; spreading process.env would carry them into an unrelated
+      // helper. Forward only the allowlisted env plus the proxy port.
+      env: buildSubprocessEnv({
         NEMOCLAW_HTTPS_PIN_PROXY_PORT: String(port),
-      },
+      }),
       stdio: ["ignore", logFd, logFd],
     });
     child.unref();
