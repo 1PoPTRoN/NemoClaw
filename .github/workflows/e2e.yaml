@@ -768,11 +768,14 @@ jobs:
         # classification/cleanup without spending live provider quota; real
         # NVIDIA credential isolation and third-party provider smokes stay
         # skipped unless their secrets are explicitly supplied by a future
-        # workflow.
+        # workflow. The HTTPS pin-proxy regression guard (#4684) stays here
+        # because it covers the same custom endpoint/provider-config boundary
+        # without requiring a real provider or Docker sandbox.
         run: |
           set -euo pipefail
           npx vitest run --project e2e-live \
             test/e2e/live/inference-routing.test.ts \
+            test/e2e/live/https-pin-proxy.test.ts \
             --silent=false --reporter=default
 
       - name: Upload inference routing artifacts
