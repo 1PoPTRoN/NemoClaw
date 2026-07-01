@@ -104,13 +104,12 @@ function writeBlueprint(workdir: string, sandboxName: string): void {
 function ensureFakeExecaModule(cleanup: { add: (name: string, fn: () => void) => void }): void {
   const execaDir = path.join(REPO_ROOT, "nemoclaw", "node_modules", "execa");
   const packageJson = path.join(execaDir, "package.json");
-  if (fs.existsSync(packageJson)) return;
-
-  fs.mkdirSync(execaDir, { recursive: true });
-  fs.writeFileSync(packageJson, JSON.stringify({ type: "module", exports: "./index.js" }));
-  fs.writeFileSync(
-    path.join(execaDir, "index.js"),
-    `import { spawn } from "node:child_process";
+  const createFakeModule = (): void => {
+    fs.mkdirSync(execaDir, { recursive: true });
+    fs.writeFileSync(packageJson, JSON.stringify({ type: "module", exports: "./index.js" }));
+    fs.writeFileSync(
+      path.join(execaDir, "index.js"),
+      `import { spawn } from "node:child_process";
 export function execa(command, args = [], options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -136,10 +135,13 @@ export function execa(command, args = [], options = {}) {
   });
 }
 `,
-  );
-  cleanup.add("remove temporary fake execa module", () => {
-    fs.rmSync(execaDir, { recursive: true, force: true });
-  });
+    );
+    cleanup.add("remove temporary fake execa module", () => {
+      fs.rmSync(execaDir, { recursive: true, force: true });
+    });
+  };
+
+  fs.existsSync(packageJson) ? undefined : createFakeModule();
 }
 
 function writeFakeOpenShell(binDir: string): string {
