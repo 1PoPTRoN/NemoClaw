@@ -382,6 +382,57 @@ describe("blueprint.schema.json", () => {
     };
     expect(validate(bad)).toBe(false);
   });
+
+  it.each([
+    ["a flag-like sandbox name", "--help"],
+    ["a leading-dash sandbox name", "-x"],
+    ["a command-substitution sandbox name", "$(id)"],
+    ["an uppercase sandbox name", "TestSandbox"],
+    ["a trailing-hyphen sandbox name", "sandbox-"],
+    ["an over-length sandbox name", "a".repeat(64)],
+  ])("rejects blueprint with %s", (_label, name) => {
+    const root = asRecord(validBlueprint);
+    const components = asRecord(root.components);
+    const sandbox = asRecord(components.sandbox);
+    const bad = {
+      ...root,
+      components: { ...components, sandbox: { ...sandbox, name } },
+    };
+    expect(validate(bad)).toBe(false);
+  });
+
+  it("rejects blueprint with a provider_name that is not an RFC 1035 label", () => {
+    const root = asRecord(validBlueprint);
+    const components = asRecord(root.components);
+    const inference = asRecord(components.inference);
+    const profiles = asRecord(inference.profiles);
+    const defaultProfile = asRecord(profiles.default);
+    const bad = {
+      ...root,
+      components: {
+        ...components,
+        inference: {
+          ...inference,
+          profiles: {
+            ...profiles,
+            default: { ...defaultProfile, provider_name: "$(id)" },
+          },
+        },
+      },
+    };
+    expect(validate(bad)).toBe(false);
+  });
+
+  it("accepts blueprint with a renamed RFC 1035 sandbox name", () => {
+    const root = asRecord(validBlueprint);
+    const components = asRecord(root.components);
+    const sandbox = asRecord(components.sandbox);
+    const renamed = {
+      ...root,
+      components: { ...components, sandbox: { ...sandbox, name: "my-sandbox-1" } },
+    };
+    expectValid(validate, renamed, "renamed sandbox");
+  });
 });
 
 // ── Model Router pool config ────────────────────────────────────────────────
