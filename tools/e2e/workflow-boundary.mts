@@ -18,6 +18,11 @@ import {
 } from "./hermes-dashboard-workflow-boundary.mts";
 import { validateHermesGpuStartupWorkflow } from "./hermes-gpu-startup-workflow-boundary.mts";
 import {
+  HERMES_TIMEOUT_CONTRACTS,
+  HERMES_TIMEOUT_HEADROOM_MAX_MINUTES,
+  HERMES_TIMEOUT_HEADROOM_MINUTES,
+} from "./hermes-timeout-contract.mts";
+import {
   type InferenceSwitchWorkflow,
   validateInferenceSwitchWorkflow,
 } from "./inference-switch-workflow-boundary.mts";
@@ -2768,6 +2773,27 @@ function validateHermesE2EJob(errors: string[], jobs: WorkflowRecord): void {
   requireRunDoesNotContain(errors, runVitest, "${{ inputs.");
 }
 
+function validateHermesTimeoutHeadroom(errors: string[], jobs: WorkflowRecord): void {
+  for (const {
+    innerTest,
+    innerTimeoutMinutes,
+    jobName,
+    jobTimeoutMinutes,
+  } of HERMES_TIMEOUT_CONTRACTS) {
+    const actualJobTimeoutMinutes = asRecord(jobs[jobName])["timeout-minutes"];
+    const maximumJobTimeoutMinutes = innerTimeoutMinutes + HERMES_TIMEOUT_HEADROOM_MAX_MINUTES;
+    if (
+      !Number.isInteger(actualJobTimeoutMinutes) ||
+      (actualJobTimeoutMinutes as number) < jobTimeoutMinutes ||
+      (actualJobTimeoutMinutes as number) > maximumJobTimeoutMinutes
+    ) {
+      errors.push(
+        `${jobName} timeout must be between ${jobTimeoutMinutes} and ${maximumJobTimeoutMinutes} minutes to cover the ${innerTimeoutMinutes}-minute Vitest timeout in ${innerTest} with ${HERMES_TIMEOUT_HEADROOM_MINUTES}-${HERMES_TIMEOUT_HEADROOM_MAX_MINUTES} minutes of job headroom`,
+      );
+    }
+  }
+}
+
 function validateDiagnosticsJob(errors: string[], jobs: WorkflowRecord): void {
   const jobName = "diagnostics";
   const targetName = "diagnostics";
@@ -4619,6 +4645,7 @@ export function validateE2eWorkflow(workflowValue: unknown): string[] {
   validateCloudInferenceJob(errors, jobs);
   validateDoubleOnboardJob(errors, jobs);
   validateHermesE2EJob(errors, jobs);
+  validateHermesTimeoutHeadroom(errors, jobs);
   validateFreeStandingJobSelector(errors, jobs, "hermes-discord", "hermes-discord");
   validateNetworkPolicyJob(errors, jobs);
   validateCommonEgressAgentJob(errors, jobs);
