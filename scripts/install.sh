@@ -2001,9 +2001,20 @@ run_preupgrade_backup() {
   NEMOCLAW_REQUIRE_ALL_SANDBOX_BACKUPS=1 "$current_cli_runner" backup-all 2>&1
 }
 
+# Return nonzero when OpenShell is absent or its version command fails.
 installed_openshell_version() {
   command_exists openshell || return 1
-  openshell --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1
+  local version_output
+  version_output="$(openshell --version 2>/dev/null)" || return 1
+  printf "%s\n" "$version_output" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1
+}
+
+# Fail closed when OpenShell is present but cannot report its version. An absent
+# binary is valid because OpenShell installation can be deferred.
+require_reportable_openshell_version() {
+  command_exists openshell || return 0
+  [ -n "$(installed_openshell_version 2>/dev/null || true)" ] && return 0
+  error "OpenShell is present on PATH but could not report its version. Refusing to start onboarding with an undeterminable OpenShell version — reinstall a supported OpenShell (run scripts/install-openshell.sh) or remove the broken binary, then rerun the installer."
 }
 
 truthy_env() {
@@ -4046,6 +4057,7 @@ main() {
   preinstall_backup_and_retire_legacy_gateway
   install_nemoclaw
   verify_nemoclaw
+  require_reportable_openshell_version
 
   # Gate the onboarding-adjacent steps on the absolute CLI path so a stale
   # shell PATH cache no longer suppresses auto-onboarding (#3276). Falls
