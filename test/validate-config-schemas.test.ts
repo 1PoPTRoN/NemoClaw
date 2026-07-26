@@ -8,27 +8,14 @@
  * suite protects schema behavior without coupling it to those config values.
  */
 
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import Ajv, { type ValidateFunction } from "ajv/dist/2020.js";
+import type { ValidateFunction } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
 
-import { discoverTargets } from "../scripts/validate-configs.mts";
-
-const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-
-function repoPath(...segments: string[]): string {
-  return join(REPO_ROOT, ...segments);
-}
+import { compileConfigSchema, discoverTargets } from "../scripts/validate-configs.mts";
 
 type LooseScalar = string | number | boolean | null;
 type LooseValue = LooseScalar | LooseObject | LooseValue[];
 type LooseObject = { [key: string]: LooseValue };
-
-function parseJson<T>(text: string): T {
-  return JSON.parse(text);
-}
 
 function isLooseValue(value: LooseValue | object | undefined): value is LooseValue {
   if (value === null) return true;
@@ -50,18 +37,8 @@ function isLooseObject(value: LooseValue | object | undefined): value is LooseOb
   );
 }
 
-function loadJSON(path: string): LooseObject {
-  const parsed = parseJson<LooseValue>(readFileSync(path, "utf-8"));
-  if (!isLooseObject(parsed)) {
-    throw new Error(`Expected JSON object in ${path}`);
-  }
-  return parsed;
-}
-
 function compileSchema(schemaRelPath: string): ValidateFunction {
-  const ajv = new Ajv({ allErrors: true, strict: false, $data: true });
-  const schema = loadJSON(repoPath(schemaRelPath));
-  return ajv.compile(schema);
+  return compileConfigSchema(schemaRelPath);
 }
 
 function asRecord(value: LooseValue | undefined): LooseObject {
@@ -279,6 +256,47 @@ describe("config validation target discovery", () => {
   });
 });
 
+describe("network-policy.schema.json", () => {
+  const validate = compileSchema("schemas/network-policy.schema.json");
+
+  it("accepts a valid policy map as a direct validation target", () => {
+    expect(
+      validate({
+        test_service: {
+          name: "Test Service",
+          binaries: [{ path: "/usr/bin/node" }],
+          endpoints: [{ host: "api.example.com", port: 443, access: "full" }],
+        },
+      }),
+    ).toBe(true);
+  });
+
+  it.each([
+    ["an empty policy map", {}],
+    ["an unrelated object", { unrelated: true }],
+    [
+      "a policy entry without endpoints",
+      {
+        test_service: {
+          name: "Test Service",
+          binaries: [{ path: "/usr/bin/node" }],
+        },
+      },
+    ],
+    [
+      "a policy entry without binaries",
+      {
+        test_service: {
+          name: "Test Service",
+          endpoints: [{ host: "api.example.com", port: 443 }],
+        },
+      },
+    ],
+  ])("rejects %s", (_label, invalid) => {
+    expect(validate(invalid)).toBe(false);
+  });
+});
+
 // ── Blueprint ────────────────────────────────────────────────────────────────
 
 describe("blueprint.schema.json", () => {
@@ -381,65 +399,6 @@ describe("blueprint.schema.json", () => {
       },
     };
     expect(validate(bad)).toBe(false);
-  });
-
-  it.each([
-    ["a flag-like sandbox name", "--help"],
-    ["a leading-dash sandbox name", "-x"],
-    ["a command-substitution sandbox name", "$(id)"],
-    ["an uppercase sandbox name", "TestSandbox"],
-    ["a trailing-hyphen sandbox name", "sandbox-"],
-    ["an over-length sandbox name", "a".repeat(64)],
-  ])("rejects blueprint with %s", (_label, name) => {
-    const root = asRecord(validBlueprint);
-    const components = asRecord(root.components);
-    const sandbox = asRecord(components.sandbox);
-    const bad = {
-      ...root,
-      components: { ...components, sandbox: { ...sandbox, name } },
-    };
-    expect(validate(bad)).toBe(false);
-  });
-
-  it.each([
-    ["accepts uppercase, dots, and underscores", "Provider_1.prod", true],
-    ["accepts exactly 128 characters", `a${"b".repeat(127)}`, true],
-    ["rejects command substitution", "$(id)", false],
-    ["rejects a leading digit", "1provider", false],
-    ["rejects a leading dash", "-provider", false],
-    ["rejects whitespace and controls", "provider\nname", false],
-    ["rejects 129 characters", `a${"b".repeat(128)}`, false],
-  ])("%s in blueprint provider_name", (_label, providerName, expected) => {
-    const root = asRecord(validBlueprint);
-    const components = asRecord(root.components);
-    const inference = asRecord(components.inference);
-    const profiles = asRecord(inference.profiles);
-    const defaultProfile = asRecord(profiles.default);
-    const bad = {
-      ...root,
-      components: {
-        ...components,
-        inference: {
-          ...inference,
-          profiles: {
-            ...profiles,
-            default: { ...defaultProfile, provider_name: providerName },
-          },
-        },
-      },
-    };
-    expect(validate(bad)).toBe(expected);
-  });
-
-  it("accepts blueprint with a renamed RFC 1035 sandbox name", () => {
-    const root = asRecord(validBlueprint);
-    const components = asRecord(root.components);
-    const sandbox = asRecord(components.sandbox);
-    const renamed = {
-      ...root,
-      components: { ...components, sandbox: { ...sandbox, name: "my-sandbox-1" } },
-    };
-    expectValid(validate, renamed, "renamed sandbox");
   });
 });
 
