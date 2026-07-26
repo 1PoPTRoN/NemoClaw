@@ -28,6 +28,7 @@ const CI_RUN_ID = 99;
 const CI_RUN_ATTEMPT = 3;
 const GATE_RUN_ID = 77;
 const APPROVAL_RUN_ID = 123;
+const DCODE_PATCH = "agents/langchain-deepagents-code/patch-managed-deepagents-code.py";
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
@@ -324,7 +325,7 @@ function successfulApprovedForkRoutes(approvals: unknown, requests: RecordedGitH
 }
 
 describe("PR E2E controller fork credentialed E2E approval safety", () => {
-  it("requires protected approval before a risky fork can run credentialed E2E", async () => {
+  it("requires the selected DCode target and protected approval before a risky fork can run credentialed E2E (#7463)", async () => {
     const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-pr-e2e-gate-fork-"));
     const outputPath = path.join(workDir, "github-output");
     fs.writeFileSync(outputPath, "", { mode: 0o600 });
@@ -350,7 +351,7 @@ describe("PR E2E controller fork credentialed E2E approval safety", () => {
           ),
           githubFetchRoute(
             ({ url }) => url.includes("/pulls/42/files?"),
-            () => githubResponse([{ filename: "src/lib/onboard.ts" }]),
+            () => githubResponse([{ filename: DCODE_PATCH }]),
           ),
           githubFetchRoute(
             ({ url, method }) => url.endsWith("/check-runs/17") && method === "PATCH",
@@ -388,7 +389,7 @@ describe("PR E2E controller fork credentialed E2E approval safety", () => {
       expect(JSON.stringify(pending?.body)).toContain("head repository `contributor/NemoClaw`");
       expect(JSON.stringify(pending?.body)).toContain(`head SHA \`${HEAD_SHA}\``);
       expect(JSON.stringify(pending?.body)).toContain(`base SHA \`${BASE_SHA}\``);
-      expect(JSON.stringify(pending?.body)).toContain("jobs:");
+      expect(JSON.stringify(pending?.body)).toContain("targets:");
       expect(JSON.stringify(pending?.body)).toContain("deterministic plan");
       expect(fs.readFileSync(outputPath, "utf8")).toContain(
         [
