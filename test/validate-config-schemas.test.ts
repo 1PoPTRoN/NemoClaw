@@ -401,7 +401,15 @@ describe("blueprint.schema.json", () => {
     expect(validate(bad)).toBe(false);
   });
 
-  it("rejects blueprint with a provider_name that is not an RFC 1035 label", () => {
+  it.each([
+    ["accepts uppercase, dots, and underscores", "Provider_1.prod", true],
+    ["accepts exactly 128 characters", `a${"b".repeat(127)}`, true],
+    ["rejects command substitution", "$(id)", false],
+    ["rejects a leading digit", "1provider", false],
+    ["rejects a leading dash", "-provider", false],
+    ["rejects whitespace and controls", "provider\nname", false],
+    ["rejects 129 characters", `a${"b".repeat(128)}`, false],
+  ])("%s in blueprint provider_name", (_label, providerName, expected) => {
     const root = asRecord(validBlueprint);
     const components = asRecord(root.components);
     const inference = asRecord(components.inference);
@@ -415,12 +423,12 @@ describe("blueprint.schema.json", () => {
           ...inference,
           profiles: {
             ...profiles,
-            default: { ...defaultProfile, provider_name: "$(id)" },
+            default: { ...defaultProfile, provider_name: providerName },
           },
         },
       },
     };
-    expect(validate(bad)).toBe(false);
+    expect(validate(bad)).toBe(expected);
   });
 
   it("accepts blueprint with a renamed RFC 1035 sandbox name", () => {

@@ -151,7 +151,23 @@ const INVALID_NAME_CASES: ReadonlyArray<
     },
     /Invalid provider name/,
   ],
+  [
+    "provider name containing a line feed",
+    (components) => {
+      components.inference.profiles.default.provider_name = "provider\n::error::forged";
+    },
+    /Invalid provider name/,
+  ],
+  [
+    "over-length provider name",
+    (components) => {
+      components.inference.profiles.default.provider_name = `a${"b".repeat(128)}`;
+    },
+    /Invalid provider name/,
+  ],
 ];
+
+const VALID_PROVIDER_NAMES = ["Provider_1.prod", `a${"b".repeat(127)}`] as const;
 
 describe("blueprint name validation (fail-closed integration)", () => {
   const RUNS_DIR = `${FAKE_HOME}/.nemoclaw/state/runs`;
@@ -179,6 +195,21 @@ describe("blueprint name validation (fail-closed integration)", () => {
     // may have executed — not merely no sandbox create.
     expect(mockExeca).not.toHaveBeenCalled();
     expect(createCalls()).toEqual([]);
+  });
+
+  it.each(
+    VALID_PROVIDER_NAMES,
+  )("apply accepts the supported provider name '%s'", async (providerName) => {
+    const bp = minimalBlueprint();
+    const components = bp.components as BlueprintComponents;
+    components.inference.profiles.default.provider_name = providerName;
+
+    await expect(actionApply("default", bp)).resolves.toBeUndefined();
+    expect(mockExeca).toHaveBeenCalledWith(
+      "openshell",
+      expect.arrayContaining(["provider", "create", "--name", providerName]),
+      expect.any(Object),
+    );
   });
 
   it("rollback rejects a plan whose sandbox_name is not an RFC 1035 label", async () => {

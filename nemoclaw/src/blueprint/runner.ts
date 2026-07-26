@@ -42,7 +42,8 @@ const { parseOpenShellPolicy, withoutProviderComposedPolicies } =
 const sourceOrGeneratedSandboxName = importedSandboxName as typeof importedSandboxName & {
   default?: typeof importedSandboxName;
 };
-const { assertValidName } = sourceOrGeneratedSandboxName.default ?? sourceOrGeneratedSandboxName;
+const { assertValidName, assertValidProviderName } =
+  sourceOrGeneratedSandboxName.default ?? sourceOrGeneratedSandboxName;
 
 type Action = "plan" | "apply" | "status" | "rollback";
 
@@ -472,7 +473,7 @@ async function resolveRunConfig(
     assertValidName(sandboxCfg.name, "sandbox name");
   }
   if (inferenceCfg.provider_name !== undefined) {
-    assertValidName(inferenceCfg.provider_name, "provider name");
+    assertValidProviderName(inferenceCfg.provider_name);
   }
 
   return { inferenceProfiles, inferenceCfg, sandboxCfg, routerCfg };
