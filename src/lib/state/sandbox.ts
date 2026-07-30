@@ -1839,6 +1839,32 @@ export type RebuildRecoveryManifestValidation =
   | { ok: false; reason: string };
 
 /**
+ * Remove one completed rebuild backup without allowing a caller-controlled
+ * path to escape the sandbox's timestamped backup directory.
+ */
+export function removeSandboxStateBackup(sandboxName: string, backupPath: string): boolean {
+  const rebuildBackupsRoot = path.resolve(REBUILD_BACKUPS_DIR);
+  const sandboxBackupRoot = path.resolve(rebuildBackupsRoot, sandboxName);
+  const candidateBackupPath = path.resolve(backupPath);
+
+  if (
+    sandboxBackupRoot === rebuildBackupsRoot ||
+    !isWithinRoot(sandboxBackupRoot, rebuildBackupsRoot) ||
+    normalizeHostPath(path.dirname(candidateBackupPath)) !== normalizeHostPath(sandboxBackupRoot)
+  ) {
+    return false;
+  }
+
+  try {
+    rejectSymlinksOnPath(candidateBackupPath);
+    rmSync(candidateBackupPath, { recursive: true, force: true });
+    return !existsSync(candidateBackupPath);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Re-read and validate a prepared rebuild backup before a destructive recovery.
  *
  * `getLatestBackup()` validates the manifest schema. Recovery additionally pins
