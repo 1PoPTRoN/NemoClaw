@@ -123,6 +123,19 @@ $$nemoclaw my-assistant snapshot restore before-upgrade
 $$nemoclaw my-assistant snapshot restore 2026-04-14T09-40-09-760Z
 ```
 
+<Warning>
+Post-restore policy reconciliation is best-effort.
+NemoClaw warns and continues the remaining restore steps in these cases:
+
+- NemoClaw cannot verify whether a custom policy owns the live `observability-otlp-local` policy entry.
+- The built-in `observability-otlp-local` policy preset has drifted or cannot be inspected.
+- NemoClaw cannot add or remove a recorded policy preset.
+
+The live network policy can then retain unwanted egress or omit expected egress until you repair the named preset.
+After a warning, run `$$nemoclaw <name> policy list`.
+Confirm that the named preset is recorded in the sandbox registry and active on the gateway, or absent from both.
+</Warning>
+
 <AgentOnly variant="hermes">
 A running Hermes gateway keeps serving its pre-restore state databases until it reopens them.
 After a restore that includes Hermes state databases, the CLI prints a reminder to restart the gateway.

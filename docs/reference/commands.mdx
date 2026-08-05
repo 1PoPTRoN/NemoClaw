@@ -3101,6 +3101,19 @@ If the containment commit fails, NemoClaw retains any exact lifecycle and deadli
 A state-directory failure that prevented gate publication also prevents normal mutation-lock acquisition.
 Correct the reported state-directory write failure, then run `$$nemoclaw <name> shields status` to resume recovery or receive exact-generation recovery guidance.
 
+<Warning>
+Post-restore policy reconciliation is best-effort.
+NemoClaw warns and continues the remaining restore steps in these cases:
+
+- NemoClaw cannot verify whether a custom policy owns the live `observability-otlp-local` policy entry.
+- The built-in `observability-otlp-local` policy preset has drifted or cannot be inspected.
+- NemoClaw cannot add or remove a recorded policy preset.
+
+The live network policy can then retain unwanted egress or omit expected egress until you repair the named preset.
+After a warning, run `$$nemoclaw <name> policy list`.
+Confirm that the named preset is recorded in the sandbox registry and active on the gateway, or absent from both.
+</Warning>
+
 The selector accepts any of:
 
 - A version (`v1`, `v2`, ..., `vN`) from `snapshot list`.
