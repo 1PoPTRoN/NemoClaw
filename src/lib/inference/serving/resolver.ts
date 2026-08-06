@@ -227,6 +227,42 @@ function readinessScopeMatches(
   return false;
 }
 
+function compareNumericDottedVersions(left: string, right: string): number | undefined {
+  const parse = (value: string): number[] | undefined => {
+    if (!/^\d+(?:\.\d+)+$/u.test(value)) return undefined;
+    const parts = value.split(".").map(Number);
+    return parts.every(Number.isSafeInteger) ? parts : undefined;
+  };
+  const leftParts = parse(left);
+  const rightParts = parse(right);
+  if (!leftParts || !rightParts) return undefined;
+  const length = Math.max(leftParts.length, rightParts.length);
+  for (let index = 0; index < length; index += 1) {
+    const difference = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+    if (difference !== 0) return difference < 0 ? -1 : 1;
+  }
+  return 0;
+}
+
+function readinessComparisonMatches(
+  actual: unknown,
+  comparison: ServingReadinessComparison,
+): boolean {
+  switch (comparison.operator) {
+    case "equals":
+      return scalarEquals(actual, comparison.value);
+    case "one-of":
+      return comparison.values.some((candidate) => scalarEquals(actual, candidate));
+    case "at-least":
+      return typeof actual === "number" && actual >= comparison.value;
+    case "version-at-least": {
+      if (typeof actual !== "string") return false;
+      const order = compareNumericDottedVersions(actual, comparison.value);
+      return order !== undefined && order >= 0;
+    }
+  }
+}
+
 function readinessRequirementMatches(
   requirement: ManagedInferenceReadinessRequirement["readiness"],
   reports: readonly ManagedInferenceReadinessSource[],

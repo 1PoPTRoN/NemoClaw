@@ -549,6 +549,110 @@ describe("managed inference resolver", () => {
     ).toMatchObject({ outcome: "no-match", code: "requirements-not-met" });
   });
 
+  it("selects a preset only when readiness observation comparisons match (#8246)", () => {
+    const catalog = hostLocalFixtureCatalog();
+    const preset = catalog.presets[0]!;
+    const comparedPreset = {
+      ...preset,
+      spec: {
+        ...preset.spec,
+        requirements: {
+          all: [
+            {
+              readiness: {
+                scope: "everyNode",
+                kind: "observation",
+                id: "host.os.platform",
+                comparison: { operator: "equals", value: "linux" },
+              },
+            },
+            {
+              readiness: {
+                scope: "everyNode",
+                kind: "observation",
+                id: "host.os.architecture",
+                comparison: { operator: "one-of", values: ["arm64", "amd64"] },
+              },
+            },
+            {
+              readiness: {
+                scope: "everyNode",
+                kind: "observation",
+                id: "host.gpu.count",
+                comparison: { operator: "at-least", value: 1 },
+              },
+            },
+            {
+              readiness: {
+                scope: "everyNode",
+                kind: "observation",
+                id: "host.gpu.driver_version",
+                comparison: { operator: "version-at-least", value: "580.65.6" },
+              },
+            },
+          ],
+        },
+      },
+    } as ManagedInferenceServingPreset;
+    const comparedCatalog: CompiledManagedInferenceCatalog = {
+      ...catalog,
+      presets: [comparedPreset],
+    };
+    const reports = readinessSources().map(({ nodeId, report }) => ({
+      nodeId,
+      report: readinessReport({
+        ...report,
+        observations: [
+          { id: "host.os.platform", state: "present", value: "linux" },
+          { id: "host.os.architecture", state: "present", value: "arm64" },
+          { id: "host.gpu.count", state: "present", value: 1 },
+          { id: "host.gpu.driver_version", state: "present", value: "580.65.06" },
+        ],
+      }),
+    }));
+
+    expect(
+      resolveManagedInferenceServing(
+        resolverInput({
+          readinessReports: reports,
+          topologyQualifications: [],
+          intent: { preset: preset.metadata.id },
+        }),
+        comparedCatalog,
+      ),
+    ).toMatchObject({ outcome: "selected" });
+
+    const nonmatchingObservations = [
+      ["equals", "host.os.platform", "windows"],
+      ["one-of", "host.os.architecture", "riscv64"],
+      ["at-least", "host.gpu.count", 0],
+      ["version-at-least", "host.gpu.driver_version", "579.99.0"],
+      ["malformed version-at-least", "host.gpu.driver_version", "580.65.x"],
+    ] as const;
+    for (const [caseName, id, value] of nonmatchingObservations) {
+      const rejectedReports = reports.map(({ nodeId, report }, index) => ({
+        nodeId,
+        report: readinessReport({
+          ...report,
+          observations: report.observations.map((observation) =>
+            index === 1 && observation.id === id ? { ...observation, value } : observation,
+          ),
+        }),
+      }));
+      expect(
+        resolveManagedInferenceServing(
+          resolverInput({
+            readinessReports: rejectedReports,
+            topologyQualifications: [],
+            intent: { preset: preset.metadata.id },
+          }),
+          comparedCatalog,
+        ),
+        `${caseName} must reject a nonmatching observation`,
+      ).toMatchObject({ outcome: "rejected", code: "requirements-not-met" });
+    }
+  });
+
   it("applies any-node readiness requirements as an existential match", () => {
     const catalog = shippedCatalog();
     const preset = shippedPreset(catalog);
