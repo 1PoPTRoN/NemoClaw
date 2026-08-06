@@ -138,6 +138,8 @@ It rejects remote endpoints and relative socket paths before service startup.
 
 The `invalid_docker_host` advisory means that `DOCKER_HOST` is not an absolute local `unix://` socket path that NemoClaw can write to the managed OpenShell gateway service environment.
 NemoClaw does not use the standalone gateway fallback when this validation fails.
+Onboarding prints the advisory identifier in parentheses after each action title in the `Suggested fix` list.
+The terminal output names `invalid_docker_host` when this validation fails, so you can match the message to this section.
 Remove the override to use Docker's default local socket:
 
 ```bash
