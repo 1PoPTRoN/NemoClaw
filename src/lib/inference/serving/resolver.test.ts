@@ -193,6 +193,34 @@ function readinessSources(): ManagedInferenceReadinessSource[] {
   ];
 }
 
+function storageRemediableReadinessReport(
+  extraFindings: SystemReadinessReport["findings"] = [],
+): SystemReadinessReport {
+  const report = readinessReport();
+  return {
+    ...report,
+    capabilities: [
+      ...report.capabilities.map((capability) =>
+        capability.id === "host.docker.storage_compatible"
+          ? { ...capability, state: "absent" as const }
+          : capability,
+      ),
+      { id: "host.docker.storage_remediation_available", state: "present" },
+    ],
+    findings: [
+      {
+        id: "host.docker.storage_incompatible",
+        severity: "blocking",
+        summary: "The Docker storage configuration requires lifecycle remediation.",
+        capabilityIds: ["host.docker.storage_compatible"],
+      },
+      ...extraFindings,
+    ],
+    status: "incompatible",
+    exitCode: 2,
+  };
+}
+
 function topology(
   overrides: Partial<ManagedInferenceTopologyQualification<ManagedClusterTopologyOutput>> = {},
 ): ManagedInferenceTopologyQualification<ManagedClusterTopologyOutput> {
@@ -690,6 +718,74 @@ describe("managed inference resolver", () => {
       outcome: "rejected",
       code: "invalid-readiness",
     });
+  });
+
+  it("admits a storage conflict that the public lifecycle can remediate (#8246)", () => {
+    const catalog = hostLocalFixtureCatalog();
+    const presetId = catalog.presets[0]!.metadata.id;
+    const result = resolveManagedInferenceServing(
+      {
+        readinessReports: [{ nodeId: "spark-head", report: storageRemediableReadinessReport() }],
+        topologyQualifications: [],
+        intent: { preset: presetId },
+        now: NOW,
+      },
+      catalog,
+    );
+
+    expect(result).toMatchObject({ outcome: "selected", selection: "explicit" });
+  });
+
+  it("rejects remediation when another blocking finding remains (#8246)", () => {
+    const report = storageRemediableReadinessReport([
+      {
+        id: "host.gpu.container_toolkit_missing",
+        severity: "blocking",
+        summary: "NVIDIA Container Toolkit is missing.",
+        capabilityIds: ["host.gpu.container_toolkit_available"],
+      },
+    ]);
+
+    expect(
+      resolveManagedInferenceServing(
+        resolverInput({ readinessReports: [{ nodeId: "spark-head", report }] }),
+      ),
+    ).toMatchObject({ outcome: "rejected", code: "invalid-readiness" });
+  });
+
+  it("rejects remediation when another fatal finding remains (#8246)", () => {
+    const report = storageRemediableReadinessReport([
+      {
+        id: "host.gpu.unavailable",
+        severity: "fatal",
+        summary: "No supported GPU is available.",
+        capabilityIds: ["host.gpu.available"],
+      },
+    ]);
+
+    expect(
+      resolveManagedInferenceServing(
+        resolverInput({ readinessReports: [{ nodeId: "spark-head", report }] }),
+      ),
+    ).toMatchObject({ outcome: "rejected", code: "invalid-readiness" });
+  });
+
+  it("rejects a storage conflict without the remediation capability (#8246)", () => {
+    const remediable = storageRemediableReadinessReport();
+    const report = {
+      ...remediable,
+      capabilities: remediable.capabilities.map((capability) =>
+        capability.id === "host.docker.storage_remediation_available"
+          ? { ...capability, state: "absent" as const }
+          : capability,
+      ),
+    };
+
+    expect(
+      resolveManagedInferenceServing(
+        resolverInput({ readinessReports: [{ nodeId: "spark-head", report }] }),
+      ),
+    ).toMatchObject({ outcome: "rejected", code: "invalid-readiness" });
   });
 
   it("rejects a non-finite resolution time", () => {
