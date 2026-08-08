@@ -186,7 +186,7 @@ async function startProtectedOllama(host: HostCliClient): Promise<string> {
   const start = await host.command(
     "bash",
     [
-      "-lc",
+      "-c",
       protectedOllamaStartScript(
         path.join(process.env.RUNNER_TEMP ?? "/tmp", "managed-image-ollama.log"),
       ),
@@ -215,7 +215,7 @@ async function proveOllamaGpuPlacement(host: HostCliClient): Promise<void> {
   const result = await host.command(
     "bash",
     [
-      "-lc",
+      "-c",
       `curl -fsS http://127.0.0.1:11434/api/ps | jq -e --arg model "${OLLAMA_MODEL}" '
         [.models[] | select((.name == $model or .model == $model) and ((.size_vram // 0) > 0))]
         | length >= 1
@@ -267,7 +267,7 @@ async function startProtectedVllm(host: HostCliClient): Promise<void> {
   const ready = await host.command(
     "bash",
     [
-      "-lc",
+      "-c",
       `set -euo pipefail
 for _ in $(seq 1 300); do
   curl -fsS --connect-timeout 2 http://127.0.0.1:8000/v1/models >/dev/null 2>&1 && exit 0
@@ -370,7 +370,7 @@ async function proveOwnedRuntimeInventoryClean(host: HostCliClient): Promise<voi
   const result = await host.command(
     "bash",
     [
-      "-lc",
+      "-c",
       `set -euo pipefail
 containers="$(docker ps -a --format '{{.Label "openshell.ai/sandbox-name"}}' --filter label=openshell.ai/managed-by=openshell | grep '^${MANAGED_IMAGE_PROTECTED_SANDBOX_PREFIX}' || true)"
 networks="$(docker network ls --format '{{.Name}}' | grep '^nemoclaw-managed-pr-' || true)"
