@@ -204,7 +204,7 @@ export async function cleanupOllama(
   host: HostCliClient,
   artifactName: string,
 ): Promise<ShellProbeResult> {
-  return await host.command("bash", ["-c", ollamaCleanupScript()], {
+  return await host.command("bash", ["-lc", ollamaCleanupScript()], {
     artifactName,
     env: env(),
     timeoutMs: 30_000,
@@ -258,7 +258,7 @@ export function assertNvidiaAvailable(
 }
 
 export async function ensureOllama(host: HostCliClient): Promise<void> {
-  const ollamaExists = await host.command("bash", ["-c", "command -v ollama"], {
+  const ollamaExists = await host.command("bash", ["-lc", "command -v ollama"], {
     artifactName: "command-v-ollama",
     env: env(),
     timeoutMs: 30_000,
@@ -270,7 +270,7 @@ export async function ensureOllama(host: HostCliClient): Promise<void> {
         await host.command(
           "bash",
           [
-            "-c",
+            "-lc",
             // Mirrors the legacy live GPU user path by exercising Ollama's official installer before secrets are passed.
             "curl -fsSL https://ollama.com/install.sh | sh",
           ],
@@ -278,17 +278,6 @@ export async function ensureOllama(host: HostCliClient): Promise<void> {
         )
       ).exitCode,
     ).toBe(0);
-  // Unasserted diagnostic. After the installer creates the ollama user,
-  // groups, and service, login shells on the protected GPU runner returned a
-  // silent exit 1 even though their script bodies reached exit 0, so the
-  // lifecycle commands above and below run bash without -l. This artifact
-  // records whether a login shell still fails after an install.
-  missing &&
-    (await host.command("bash", ["-lc", "echo post-install-login-shell-ok"], {
-      artifactName: "post-install-login-shell-probe",
-      env: env(),
-      timeoutMs: 30_000,
-    }));
 }
 
 export function assertGpuInstallProofs(log: string): void {
@@ -319,7 +308,7 @@ export async function restartProxy(host: HostCliClient, token: string): Promise<
   return await host.command(
     "bash",
     [
-      "-c",
+      "-lc",
       `set -euo pipefail
 token="\${NEMOCLAW_GPU_E2E_PROXY_TOKEN:?missing proxy token}"
 proxy_pid="$(lsof -tiTCP:"$1" -sTCP:LISTEN 2>/dev/null | head -n1 || true)"
@@ -360,7 +349,7 @@ export async function detectOllamaModel(host: HostCliClient): Promise<string> {
       await host.command(
         "bash",
         [
-          "-c",
+          "-lc",
           'curl -sf http://127.0.0.1:11434/api/tags | python3 -c \'import json,sys; m=json.load(sys.stdin).get("models",[]); print(m[0]["name"] if m else "")\'',
         ],
         { artifactName: "detect-ollama-model", env: env(), timeoutMs: 30_000 },
