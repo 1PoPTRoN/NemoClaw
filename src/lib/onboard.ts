@@ -2580,6 +2580,7 @@ async function createSandboxWithBaseImageResolution(
     route: selectedGpuRoute,
     firstCreateOutput,
     registryImageRef,
+    lifecycleRegistrationFields,
   } = await sandboxGpuCreateFlow.runSandboxGpuCreateFlow(
     {
       sandboxName,
@@ -2594,6 +2595,7 @@ async function createSandboxWithBaseImageResolution(
       createArgv,
       sandboxEnv,
       sandboxStartupCommand,
+      lifecycleRegistrationFields: recreateRuntime.registrationFields,
       prebuild,
       restoreBackupPath,
       terminalAgent: agentDefs.isTerminalAgent(agent),
@@ -2613,8 +2615,6 @@ async function createSandboxWithBaseImageResolution(
     process.removeListener("exit", initialSandboxPolicy.cleanup);
   }
 
-  // Clean up build context regardless of outcome.
-  // Use fs.rmSync instead of run() to avoid spawning a shell process.
   // Only deregister the 'exit' safety net when inline cleanup succeeded;
   // otherwise leave it armed so a later process.exit() still removes the
   // temp dir (which may hold source and env-arg API keys).
@@ -2724,7 +2724,7 @@ async function createSandboxWithBaseImageResolution(
           hermesToolGateways,
           hermesDashboardState: finalHermesDashboardState,
           dashboardPort: actualDashboardPort,
-          ...recreateRuntime.registrationFields,
+          ...lifecycleRegistrationFields,
           gatewayName: GATEWAY_NAME,
           gatewayPort: GATEWAY_PORT,
         }),
