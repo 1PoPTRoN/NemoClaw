@@ -156,6 +156,7 @@ COPY scripts/patch-openclaw-mcp-tools-list-timeout.mts /usr/local/lib/nemoclaw/p
 COPY scripts/patch-openclaw-issue-4434-diagnostics.mts /usr/local/lib/nemoclaw/patch-openclaw-issue-4434-diagnostics.mts
 COPY scripts/patch-openclaw-managed-transport-diagnostics.mts /usr/local/lib/nemoclaw/patch-openclaw-managed-transport-diagnostics.mts
 COPY scripts/patch-openclaw-device-self-approval.mts /usr/local/lib/nemoclaw/patch-openclaw-device-self-approval.mts
+COPY scripts/openclaw/patch-gateway-daemon-dialback.mts /usr/local/lib/nemoclaw/patch-openclaw-gateway-daemon-dialback.mts
 COPY scripts/extract-semver.sh /usr/local/lib/nemoclaw/extract-semver
 COPY scripts/patch-openclaw-shared-state-permissions.mts /usr/local/lib/nemoclaw/patch-openclaw-shared-state-permissions.mts
 COPY scripts/verify-wechat-runtime-lock.mts /usr/local/lib/nemoclaw/verify-wechat-runtime-lock.mts
@@ -406,6 +407,7 @@ RUN chmod 755 /usr/local/lib/nemoclaw/patch-openclaw-tool-catalog.mts \
         /usr/local/lib/nemoclaw/patch-openclaw-issue-4434-diagnostics.mts \
         /usr/local/lib/nemoclaw/patch-openclaw-managed-transport-diagnostics.mts \
         /usr/local/lib/nemoclaw/patch-openclaw-device-self-approval.mts \
+        /usr/local/lib/nemoclaw/patch-openclaw-gateway-daemon-dialback.mts \
         /usr/local/lib/nemoclaw/extract-semver \
         /usr/local/lib/nemoclaw/patch-openclaw-shared-state-permissions.mts \
         /usr/local/lib/nemoclaw/verify-wechat-runtime-lock.mts
@@ -994,6 +996,22 @@ RUN node --experimental-strip-types /usr/local/lib/nemoclaw/patch-openclaw-chat-
 # hadolint ignore=DL3059
 RUN node --experimental-strip-types /usr/local/lib/nemoclaw/patch-openclaw-device-self-approval.mts \
     /usr/local/lib/node_modules/openclaw/dist
+
+# Keep backend RPC initiated by the OpenClaw gateway daemon on loopback while
+# preserving OPENCLAW_GATEWAY_URL for agent processes that OpenShell requires
+# to use the private sandbox interface. This avoids pairing failures when the
+# transparent proxy makes gateway daemon self-dialback appear to originate from
+# a private IP address and trigger pairing while preserving sessions_spawn
+# routing (#7215).
+#
+# Removal criteria: drop when upstream OpenClaw distinguishes gateway daemon
+# self-dialback from descendant agent routing without changing the inherited
+# gateway URL.
+# hadolint ignore=DL3059
+RUN if [ "$OPENCLAW_VERSION" = "2026.7.1" ]; then \
+      node --experimental-strip-types /usr/local/lib/nemoclaw/patch-openclaw-gateway-daemon-dialback.mts \
+        /usr/local/lib/node_modules/openclaw/dist; \
+    fi
 
 # Patch OpenClaw TUI unreachable-inference diagnostics for #4434.
 #
@@ -1852,6 +1870,7 @@ RUN check_metadata() { \
     && check_metadata /scripts/patch-bundled-npm-tar.mts 'root:root:755' \
     && check_metadata /opt/nemoclaw/openclaw.plugin.json 'root:root:644' \
     && check_metadata /usr/local/lib/nemoclaw/patch-openclaw-tool-catalog.mts 'root:root:755' \
+    && check_metadata /usr/local/lib/nemoclaw/patch-openclaw-gateway-daemon-dialback.mts 'root:root:755' \
     && test ! -L /usr/local/bin/nemoclaw-managed-bootstrap \
     && check_metadata /usr/local/bin/nemoclaw-managed-bootstrap 'root:root:755' \
     && test ! -L /usr/local/lib/nemoclaw/managed-bootstrap-trampoline.sh \
