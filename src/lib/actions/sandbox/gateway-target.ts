@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { GATEWAY_PORT } from "../../core/ports";
-import { resolveGatewayName, resolveSandboxGatewayName } from "../../onboard/gateway-binding";
+import {
+  resolveGatewayName,
+  resolveSandboxGatewayName,
+  type SandboxGatewayBinding,
+} from "../../onboard/gateway-binding";
 import * as registry from "../../state/registry";
 
 export function getKnownSandboxTarget(sandboxName: string): registry.SandboxEntry | null {
@@ -16,6 +20,11 @@ export function getKnownSandboxTargetGatewayName(sandboxName = ""): string | nul
 
 export function getSandboxTargetGatewayName(sandboxName = ""): string {
   return getKnownSandboxTargetGatewayName(sandboxName) ?? resolveGatewayName(GATEWAY_PORT);
+}
+
+/** Resolve a gateway directly from the already-authoritative persisted row. */
+export function getPersistedSandboxTargetGatewayName(sandbox: SandboxGatewayBinding): string {
+  return resolveSandboxGatewayName(sandbox);
 }
 
 export function gatewayNamePattern(gatewayName: string): RegExp {
