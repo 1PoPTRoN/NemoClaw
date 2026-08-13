@@ -8,6 +8,12 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import {
+  createHermesUnsafeConfigHarness,
+  expectHermesShieldsUpRecord,
+  failHermesInferenceConvergence,
+  type HermesUnsafeConfigHarness,
+} from "../../../test/helpers/hermes-unsafe-config-shields-harness";
+import {
   createShieldsFlowHarness,
   type ShieldsFlowHarnessOptions,
 } from "../../../test/helpers/shields-flow-harness";
@@ -1002,5 +1008,153 @@ describe("OpenClaw shields flow rollback and recovery", () => {
       JSON.parse(fs.readFileSync(path.join(stateDir, "shields-openclaw.json"), "utf-8"))
         .shieldsDown,
     ).toBe(true);
+  });
+});
+
+describe("Hermes Shields down unsafe config path (#8804)", () => {
+  const harnessFactory = createHermesUnsafeConfigHarness(requireSource, INDEX_MODULE);
+  let harness: HermesUnsafeConfigHarness;
+
+  beforeEach(() => {
+    harness = harnessFactory.beforeEachHook();
+  });
+
+  afterEach(() => {
+    harnessFactory.afterEachHook();
+  });
+
+  it("rejects a Hermes config symlink before Shields down weakens posture (#8804)", () => {
+    const stateDir = harness.seedLockedState("hermes-shields");
+    harness.setScenario("preflight-symlink");
+
+    expect(() =>
+      harness.shields.shieldsDown("hermes-shields", { reason: "unsafe-path", throwOnError: true }),
+    ).toThrow(/refusing symlink path: .*config\.yaml/);
+
+    expect(harness.runSpy).not.toHaveBeenCalled();
+    expect(harness.auditSpy).not.toHaveBeenCalled();
+    expectHermesShieldsUpRecord(stateDir, "hermes-shields", harness.shields);
+    expect(harness.shields.getShieldsPosture("hermes-shields", false)).toMatchObject({
+      locked: true,
+      mutable: false,
+    });
+  });
+
+  it("rejects a replaced Hermes config directory before Shields down weakens posture (#8804)", () => {
+    const stateDir = harness.seedLockedState("hermes-shields");
+    harness.setScenario("preflight-dir-symlink");
+
+    expect(() =>
+      harness.shields.shieldsDown("hermes-shields", { reason: "unsafe-path", throwOnError: true }),
+    ).toThrow(/refusing symlink path: .*\.hermes/);
+
+    expect(harness.runSpy).not.toHaveBeenCalled();
+    expect(harness.auditSpy).not.toHaveBeenCalled();
+    expectHermesShieldsUpRecord(stateDir, "hermes-shields", harness.shields);
+    expect(harness.shields.getShieldsPosture("hermes-shields", false)).toMatchObject({
+      locked: true,
+      mutable: false,
+    });
+  });
+
+  it("rejects a missing Hermes config before Shields down weakens posture (#8804)", () => {
+    const stateDir = harness.seedLockedState("hermes-shields");
+    harness.setScenario("preflight-missing-config");
+
+    expect(() =>
+      harness.shields.shieldsDown("hermes-shields", {
+        reason: "missing-config",
+        throwOnError: true,
+      }),
+    ).toThrow(/missing config path: .*config\.yaml/);
+
+    expect(harness.runSpy).not.toHaveBeenCalled();
+    expect(harness.auditSpy).not.toHaveBeenCalled();
+    expectHermesShieldsUpRecord(stateDir, "hermes-shields", harness.shields);
+    expect(harness.shields.getShieldsPosture("hermes-shields", false)).toMatchObject({
+      locked: true,
+      mutable: false,
+    });
+  });
+
+  it("rejects a Hermes sensitive-file symlink before Shields down weakens posture (#8804)", () => {
+    const stateDir = harness.seedLockedState("hermes-shields");
+    harness.setScenario("preflight-sensitive-file-symlink");
+
+    expect(() =>
+      harness.shields.shieldsDown("hermes-shields", { reason: "unsafe-path", throwOnError: true }),
+    ).toThrow(/refusing symlink path: .*\.env/);
+
+    expect(harness.runSpy).not.toHaveBeenCalled();
+    expect(harness.auditSpy).not.toHaveBeenCalled();
+    expectHermesShieldsUpRecord(stateDir, "hermes-shields", harness.shields);
+    expect(harness.shields.getShieldsPosture("hermes-shields", false)).toMatchObject({
+      locked: true,
+      mutable: false,
+    });
+  });
+
+  it("keeps DOWN when unlock fails and unsafe re-lock cannot verify protection (#8804)", () => {
+    const stateDir = harness.seedLockedState("hermes-shields");
+    harness.setScenario("unlock-symlink");
+
+    expect(() =>
+      harness.shields.shieldsDown("hermes-shields", {
+        reason: "unsafe-path",
+        timeout: "15m",
+        throwOnError: true,
+      }),
+    ).toThrow(/refusing to follow symlink: \/sandbox\/\.hermes\/config\.yaml/);
+
+    expect(
+      JSON.parse(fs.readFileSync(path.join(stateDir, "shields-hermes-shields.json"), "utf-8")),
+    ).toMatchObject({ shieldsDown: true });
+    expect(harness.auditSpy).not.toHaveBeenCalled();
+    const errors = harness.errorSpy.mock.calls.flat().map(String).join("\n");
+    expect(errors).toContain("Manual intervention is required");
+    expect(errors).not.toContain("provisional Shields down cleared");
+  });
+
+  it("keeps DOWN when unsafe replacement breaks rollback after mutation begins (#8804)", () => {
+    const stateDir = harness.seedLockedState("hermes-shields");
+    harness.setScenario("unlock-partial-rollback-symlink");
+
+    expect(() =>
+      harness.shields.shieldsDown("hermes-shields", {
+        reason: "unsafe-path-during-unlock",
+        timeout: "15m",
+        throwOnError: true,
+      }),
+    ).toThrow(/refusing to follow symlink: \/sandbox\/\.hermes\/config\.yaml/);
+
+    const errors = harness.errorSpy.mock.calls.flat().map(String).join("\n");
+    expect(
+      JSON.parse(fs.readFileSync(path.join(stateDir, "shields-hermes-shields.json"), "utf-8")),
+    ).toMatchObject({ shieldsDown: true });
+    expect(harness.shields.isShieldsDown("hermes-shields")).toBe(true);
+    expect(errors).toContain("Hermes shields rollback preparation failed");
+    expect(errors).toContain("Manual intervention is required");
+    expect(errors).not.toContain("provisional Shields down cleared");
+  });
+
+  it("keeps DOWN when unlock succeeded and unsafe re-lock cannot verify protection (#8804)", () => {
+    const stateDir = harness.seedLockedState("hermes-shields");
+    harness.setScenario("unlock-ok-relock-symlink");
+    failHermesInferenceConvergence(requireSource);
+
+    expect(() =>
+      harness.shields.shieldsDown("hermes-shields", {
+        reason: "unsafe-path-after-unlock",
+        timeout: "15m",
+        throwOnError: true,
+      }),
+    ).toThrow(/Hermes inference route did not converge/);
+
+    const errors = harness.errorSpy.mock.calls.flat().map(String).join("\n");
+    expect(
+      JSON.parse(fs.readFileSync(path.join(stateDir, "shields-hermes-shields.json"), "utf-8")),
+    ).toMatchObject({ shieldsDown: true });
+    expect(errors).toContain("Manual intervention is required");
+    expect(errors).not.toContain("provisional Shields down cleared");
   });
 });
