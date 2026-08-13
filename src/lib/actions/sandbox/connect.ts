@@ -76,6 +76,7 @@ import {
   ensureLiveSandboxOrExit,
   printGatewayLifecycleHint,
   recoverPortableDemoSandboxLifecycleForConnect,
+  startStoppedSandboxContainerForProbeRecovery,
 } from "./gateway-state";
 import { getSandboxTargetGatewayName } from "./gateway-target";
 import { printGatewayWedgeDiagnostics } from "./gateway-wedge-diagnostics";
@@ -1279,6 +1280,9 @@ export async function connectSandbox(
       const publicationRequest = publicationFromDecision(sandboxName, readiness);
       const gated = await withLaunchReadinessMutationGate(publicationRequest, async () => {
         await runConnectEntryPreflight(sandboxName, { probeOnly: true });
+        // Restart a stopped container before the readiness wait. Without this step,
+        // OpenShell keeps reporting the stopped sandbox until the wait expires (#8967).
+        startStoppedSandboxContainerForProbeRecovery(sandboxName);
         waitForSandboxReadyOrExit(sandboxName, {
           defaultTimeoutSec: 300,
           retryCommand: "connect --probe-only",
