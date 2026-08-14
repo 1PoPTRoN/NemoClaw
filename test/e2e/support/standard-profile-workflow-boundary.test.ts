@@ -54,6 +54,18 @@ describe("standard E2E execution profile boundary", () => {
     );
   });
 
+  it("rejects catalogue callers that bypass E2E credential authorization (#9047)", () => {
+    const workflow = readWorkflow() as {
+      jobs: Record<string, { with: Record<string, string> }>;
+    };
+    workflow.jobs["catalogue-brave-nvidia-inference"]!.with.trusted_main =
+      "${{ github.repository == 'NVIDIA/NemoClaw' && github.ref == 'refs/heads/main' }}";
+
+    expect(validateStandardProfileWorkflowBoundary(workflow)).toContain(
+      "catalogue-brave-nvidia-inference must pass trusted_main from the catalogue matrix",
+    );
+  });
+
   it("rejects catalogue callers without dispatch-bound manual PR risk-signal identity", () => {
     const workflow = readWorkflow() as {
       jobs: Record<string, { with: Record<string, string> }>;
@@ -336,7 +348,7 @@ describe("standard E2E execution profile boundary", () => {
       expect(validateStandardProfileWorkflowBoundary(readWorkflow(), profilePath)).toEqual(
         expect.arrayContaining([
           "standard E2E profile checkout action must use a full commit SHA",
-          "standard E2E profile must check out the exact candidate without credentials",
+          "standard E2E profile must check out checkout_sha without credentials",
           "standard E2E profile Docker Hub auth-required must be guarded by trusted_main",
           "standard E2E profile must install only the planned host packages with the reviewed action",
           "standard E2E profile must install host dependencies before workspace prep",

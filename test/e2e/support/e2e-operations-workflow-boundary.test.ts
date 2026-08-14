@@ -252,6 +252,123 @@ const interpolatedNeeds = \${{   toJSON ( needs )   }};
     );
   });
 
+  it("rejects changes that bypass E2E credential authorization (#9047)", () => {
+    const workflow = readE2eOperationsWorkflow();
+    delete workflow.jobs["generate-matrix"].outputs!.e2e_credentials_allowed;
+    const credentialAuthorization = workflow.jobs["generate-matrix"].steps!.find(
+      (step) => step.name === "Authorize E2E credentials",
+    )!;
+    credentialAuthorization.run = "printf 'allowed=true\\n' >> \"$GITHUB_OUTPUT\"";
+
+    expect(validateE2eOperationsWorkflow(workflow)).toEqual(
+      expect.arrayContaining([
+        "Manual PR credential authorization must expose only the authorization result",
+        'Manual PR credential authorization must retain "$WORKFLOW_REPOSITORY" == "NVIDIA/NemoClaw"',
+        'Manual PR credential authorization must retain "$(git rev-parse --verify HEAD)" == "$CHECKOUT_SHA"',
+      ]),
+    );
+  });
+
+  it.each([
+    {
+      caseName: "matching repository and requested SHAs",
+      checkoutRepository: "NVIDIA/NemoClaw",
+      workflowRepository: "NVIDIA/NemoClaw",
+      checkoutShaMatches: true,
+      workflowShaMatches: true,
+      expectedAllowed: true,
+    },
+    {
+      caseName: "a checkout repository outside NVIDIA/NemoClaw",
+      checkoutRepository: "contributor/NemoClaw",
+      workflowRepository: "NVIDIA/NemoClaw",
+      checkoutShaMatches: true,
+      workflowShaMatches: true,
+      expectedAllowed: false,
+    },
+    {
+      caseName: "a workflow repository outside NVIDIA/NemoClaw",
+      checkoutRepository: "NVIDIA/NemoClaw",
+      workflowRepository: "contributor/NemoClaw",
+      checkoutShaMatches: true,
+      workflowShaMatches: true,
+      expectedAllowed: false,
+    },
+    {
+      caseName: "checkout_sha differs from the checked-out commit",
+      checkoutRepository: "NVIDIA/NemoClaw",
+      workflowRepository: "NVIDIA/NemoClaw",
+      checkoutShaMatches: false,
+      workflowShaMatches: true,
+      expectedAllowed: false,
+    },
+    {
+      caseName: "a requested workflow SHA that differs from the running workflow",
+      checkoutRepository: "NVIDIA/NemoClaw",
+      workflowRepository: "NVIDIA/NemoClaw",
+      checkoutShaMatches: true,
+      workflowShaMatches: false,
+      expectedAllowed: false,
+    },
+  ])(
+    "sets E2E credential access to $expectedAllowed for $caseName (#9047)",
+    ({
+      checkoutRepository,
+      workflowRepository,
+      checkoutShaMatches,
+      workflowShaMatches,
+      expectedAllowed,
+    }) => {
+      const workflow = readE2eOperationsWorkflow();
+      const credentialAuthorization = workflow.jobs["generate-matrix"].steps!.find(
+        (step) => step.name === "Authorize E2E credentials",
+      )!;
+      const checkedOutSha = spawnSync("git", ["rev-parse", "HEAD"], {
+        encoding: "utf8",
+      }).stdout.trim();
+      const checkoutSha = checkoutShaMatches ? checkedOutSha : "0".repeat(40);
+      const workflowSha = "c".repeat(40);
+      const expectedWorkflowSha = workflowShaMatches ? workflowSha : "d".repeat(40);
+      const directory = mkdtempSync(join(tmpdir(), "nemoclaw-e2e-credentials-"));
+      const output = join(directory, "output");
+
+      try {
+        writeFileSync(output, "");
+        const result = spawnSync(
+          "bash",
+          [
+            "--noprofile",
+            "--norc",
+            "-e",
+            "-o",
+            "pipefail",
+            "-c",
+            credentialAuthorization.run!,
+          ],
+          {
+            encoding: "utf8",
+            env: {
+              ...process.env,
+              CHECKOUT_REPOSITORY: checkoutRepository,
+              CHECKOUT_SHA: checkoutSha,
+              EVENT_NAME: "workflow_dispatch",
+              EXPECTED_WORKFLOW_SHA: expectedWorkflowSha,
+              GITHUB_OUTPUT: output,
+              REF: "refs/heads/main",
+              WORKFLOW_REPOSITORY: workflowRepository,
+              WORKFLOW_SHA: workflowSha,
+            },
+          },
+        );
+
+        expect(result.status, result.stderr).toBe(0);
+        expect(readFileSync(output, "utf8")).toBe(`allowed=${expectedAllowed ? "true" : "false"}\n`);
+      } finally {
+        rmSync(directory, { force: true, recursive: true });
+      }
+    },
+  );
+
   it("keeps catalogue-owned GPU targets out of the handwritten workflow jobs", () => {
     const workflow = readE2eOperationsWorkflow();
     workflow.jobs["llama-cpp-generic-gpu"] = {
