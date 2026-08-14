@@ -372,7 +372,7 @@ describe("runSandboxGpuCreateFlow provider-owned managed create", () => {
       "mxc-launch",
       input.createArgv.slice(1),
       input.sandboxEnv,
-      expect.anything(),
+      expect.objectContaining({ readyCheckOutputPatterns: [] }),
     );
     expect(recoverUnfinished.mock.invocationCallOrder[0]).toBeLessThan(
       prepareNetwork.mock.invocationCallOrder[0],
@@ -721,6 +721,27 @@ describe("runSandboxGpuCreateFlow native failure and readiness", () => {
     expect(mocks.createDockerGpuSandboxCreatePatch).toHaveBeenCalledWith(
       expect.objectContaining({ route: "native", persistStartupCommand: false }),
     );
+  });
+
+  it("waits for native non-terminal startup output before detaching the create client", async () => {
+    const input = createInput();
+    input.sandboxEnv = { OPENSHELL_DRIVERS: "docker" };
+
+    await expect(runSandboxGpuCreateFlow(input, createDeps())).resolves.toMatchObject({
+      route: "native",
+    });
+
+    const streamOptions = mocks.streamSandboxCreate.mock.calls[0]?.[3];
+    expect(streamOptions).toEqual(
+      expect.objectContaining({
+        readyCheckOutputPatterns: [expect.any(RegExp)],
+      }),
+    );
+    expect(
+      streamOptions?.readyCheckOutputPatterns?.some((pattern: RegExp) =>
+        pattern.test("Setting up NemoClaw (Hermes)..."),
+      ),
+    ).toBe(true);
   });
 
   it("applies exact required limits while preserving the native GPU route", async () => {
