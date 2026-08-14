@@ -5,20 +5,30 @@ apiVersion: nemoclaw.nvidia.com/managed-inference/v1
 kind: ServingPreset
 
 metadata:
-  id: llama-cpp.linux-amd64-nvidia.single.nemotron-3-nano-30b-a3b
-  displayName: NVIDIA Nemotron 3 Nano 30B-A3B on one Linux x86_64 NVIDIA GPU
+  id: llama-cpp.dgx-spark-gb10.single.muse-glimmer-30b
+  displayName: Meta Muse Glimmer 30B on one DGX Spark
   supportState: experimental
 
 spec:
   selection: automatic
-  priority: 440
+  priority: 500
 
   requirements:
     all:
       - readiness:
           scope: everyNode
+          kind: qualification
+          id: host.platform.dgx_spark
+          status: qualified
+      - readiness:
+          scope: everyNode
           kind: capability
           id: host.platform.supported
+          state: present
+      - readiness:
+          scope: everyNode
+          kind: capability
+          id: host.platform.dgx_spark
           state: present
       - readiness:
           scope: everyNode
@@ -68,7 +78,7 @@ spec:
           id: host.os.architecture
           comparison:
             operator: equals
-            value: x64
+            value: arm64
       - readiness:
           scope: everyNode
           kind: observation
@@ -93,4 +103,4 @@ spec:
 
   plan:
     backend: install-llama-cpp
-    recipeRef: llama-cpp.nemotron-3-nano-30b-a3b.spark-single.v1
+    recipeRef: llama-cpp.muse-glimmer-30b.spark-single.v1
