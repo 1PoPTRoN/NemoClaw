@@ -4533,26 +4533,34 @@ The command requires the exact feature gate `NEMOCLAW_EXPERIMENTAL_VOICE_GATEWAY
 Any other value stops the command before argument parsing, credential reads, or listener creation.
 Other experimental feature gates do not enable this command.
 
-Before you start the adapter, provision these two credential files outside the repository:
+Before starting the adapter, the bounded voice-gateway launcher opens two owner-only regular files without following symbolic links and maps only these inherited file descriptors into the child process:
 
-- `--deployment-credential-file` authenticates the configured runtime deployment during session admission.
-- `--openclaw-credential-file` authenticates NemoClaw to the configured OpenClaw agent gateway with `operator.read` and `operator.write` scopes.
+- Descriptor `3` supplies the deployment credential used during session admission.
+- Descriptor `4` supplies the OpenClaw credential with `operator.read` and `operator.write` scopes.
 
-Both paths must be absolute paths to owner-only regular files.
-The command rejects symbolic links, access by group or other users, malformed values, and oversized values.
-The deployment owns each file location, lifetime, rotation, and removal.
-Stopping the command does not remove either file.
-The command reads both files only at startup and does not reload them.
-To rotate either credential, stop the command, replace the file, and start the command again.
-Removing a file does not revoke the credential in a running process.
+The descriptor numbers are fixed and are not configurable flags.
+The command rejects missing, duplicate, non-regular, wrong-owner, group-accessible, malformed, and oversized inputs.
+It reads each descriptor once and closes both before accepting traffic.
+Both credential values remain in process memory until the voice-gateway process stops.
+The launcher does not place credential source paths or values in arguments or environment variables.
+It intentionally inherits only credential descriptors `3` and `4` across this exec, then closes its parent copies.
+To rotate either credential, stop the command and restart it with newly opened descriptors.
 NemoClaw does not send the OpenClaw credential to the runtime.
+The trusted caller selects each credential source path and invokes the launcher.
+That caller must create, replace, and remove each source file and revoke old credential values.
+The launcher opens each source file, maps the inherited child descriptors, and closes its parent copies.
+The child validates, reads, and closes descriptors `3` and `4` before it accepts traffic.
+Closing the descriptors or stopping the gateway does not remove a source file or revoke its credential.
 
-Start the adapter with trusted operator-selected values:
+The launcher is an internal library boundary for trusted external integrations, not another CLI command and not part of normal NemoClaw managed startup.
+Callers use the shipped `runVoiceGatewayLaunch()` action with trusted source paths and runtime fields; package-contract coverage launches the real internal command through that production entry point and verifies descriptor cleanup and restart-based credential rotation.
+If parent descriptor cleanup fails and bounded termination does not observe child exit, the action throws `VoiceGatewayTerminationUnconfirmedError` with the retained child handle and original cleanup failure.
+The trusted caller must recognize that error, terminate and reap its `child`, and confirm exit before starting another gateway.
+The launcher emits the following child-process contract with no credential paths or values in its arguments or environment.
+Do not run this child command directly because it requires the launcher's descriptor mapping.
 
-```bash
+```text
 NEMOCLAW_EXPERIMENTAL_VOICE_GATEWAY=1 $$nemoclaw internal voice-gateway serve \
-  --deployment-credential-file /absolute/private/path/deployment-bearer \
-  --openclaw-credential-file /absolute/private/path/openclaw-bearer \
   --gateway-url ws://127.0.0.1:18789/ws \
   --runtime-identity <deployment-identity> \
   --runtime-profile <runtime-profile-id> \
