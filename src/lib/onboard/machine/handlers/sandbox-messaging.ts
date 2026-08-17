@@ -356,6 +356,7 @@ function selectionFromRecordedChannels<Agent>(
   if (envPlan) selection = selectionFromReusablePlan(envPlan, options.agent, false, options.deps);
   else if (registryPlan)
     selection = selectionFromReusablePlan(registryPlan, options.agent, true, options.deps);
+  selection = filterUnconfiguredHostChannelsFromSelection(selection, options.agent);
   if (selection.selectedChannels.length > 0) {
     options.deps.note(
       `  [non-interactive] Reusing messaging channel configuration: ${selection.selectedChannels.join(", ")}`,
@@ -434,9 +435,15 @@ export function reconcileReusedSandboxMessaging<Agent>(
   const filtered = plan ? filterMessagingPlanForCurrentAgent(plan, agent) : null;
   const changed = !isDeepStrictEqual(filtered, recordedPlan);
   if (changed) deps.clearPlanEnv();
+  // The reused plan records the previous selection, not the current host
+  // input. Report only channels the environment still configures so the
+  // policies handler can classify a retired channel as unconfigured and drop
+  // its egress preset (#9283). The plan itself stays untouched.
   return {
-    plan: filtered,
-    selectedChannels: getActiveChannelsFromPlan(filtered),
+    ...filterUnconfiguredHostChannelsFromSelection(
+      { plan: filtered, selectedChannels: getActiveChannelsFromPlan(filtered) },
+      agent,
+    ),
     changed,
   };
 }

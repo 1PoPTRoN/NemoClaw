@@ -21,6 +21,7 @@ import { baseOptions, createDeps, makeMinimalPlan } from "./sandbox-test-fixture
 
 vi.mock("../../messaging-channel-setup", () => ({
   detectMessagingChannelsFromEnv: vi.fn(() => []),
+  detectUnconfiguredMessagingChannels: vi.fn(() => []),
 }));
 
 vi.mocked(detectMessagingChannelsFromEnv).mockReturnValue([]);
