@@ -929,6 +929,7 @@ const providerExistsInGateway = (name: string, gatewayName: string = GATEWAY_NAM
 const {
   verifyInferenceRoute,
   isInferenceRouteReady,
+  readInferenceRouteState,
   checkGatewayRouteCompatibility,
   preflightGatewayRouteDiscovery,
 } = inferenceRouteHelpers.createInferenceRouteHelpers(runCaptureOpenshell);
@@ -944,8 +945,6 @@ const { inspectSandboxForCreate, confirmRecreateForSelectionDrift, isOpenclawRea
 
 const { ensureValidatedWebSearchCredential, ensureValidatedBraveSearchCredential, configureWebSearch, verifyWebSearchInsideSandbox, webSearchProviderForConfig } = createWebSearchFlowHelpers({ prompt, note, isNonInteractive, cliName, runCaptureOpenshell });
 
-// getSandboxInferenceConfig — moved to onboard-providers.ts
-// Inference probes — moved to inference/onboard-probes.ts
 const {
   hasResponsesToolCall,
   hasChatCompletionsToolCall,
@@ -3020,7 +3019,7 @@ async function preflightAuthoritativeRebuildTarget(
             fail(`OpenShell component preflight exited with code ${String(code)}`),
           ),
         assertGatewayReadiness: onboardPreflightGatewayAuthority.collectGatewayReadiness,
-        inferenceRouteReady: (p, m) => isInferenceRouteReady(authoritativeGateway.name, p, m),
+        inferenceRouteState: (p, m) => readInferenceRouteState(authoritativeGateway.name, p, m),
         captureForwardList: () => runCaptureOpenshell(["forward", "list"], { ignoreError: true }),
         checkPort: (port) => checkPortAvailable(port),
       },
