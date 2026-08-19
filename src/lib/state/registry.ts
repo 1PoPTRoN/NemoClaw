@@ -29,6 +29,22 @@ import {
   load,
   save,
 } from "./registry/persistence";
+import {
+  isCurrentSandboxInferenceRouteReservation,
+  sandboxRegistrationMatchesInferenceRouteReservation,
+  type QualifiedSandboxInferenceRouteReservation,
+} from "./registry/route-reservation";
+export {
+  classifySandboxInferenceRouteReservation,
+  isCurrentSandboxInferenceRouteReservation,
+  isPendingReservationForSession,
+  isRouteOnlySandboxReservation,
+  normalizeSandboxInferenceRouteSelection,
+  sandboxRegistrationMatchesInferenceRouteReservation,
+  type QualifiedSandboxInferenceRouteReservation,
+  type SandboxInferenceRouteReservationAuthority,
+  type SandboxInferenceRouteReservationDisposition,
+} from "./registry/route-reservation";
 import { cloneSandboxWorkloadReceipt } from "./registry/workload";
 import { normalizeSandboxMcpState } from "./registry-mcp";
 import {
@@ -125,9 +141,22 @@ export function getDefault(): string | null {
   return names.length > 0 ? names[0] || null : null;
 }
 
-export function registerSandbox(entry: SandboxEntry): void {
-  withLock(() => {
+export function registerSandbox(
+  entry: SandboxEntry,
+  routeReservation?: QualifiedSandboxInferenceRouteReservation,
+): SandboxEntry {
+  return withLock(() => {
     const data = load();
+    if (
+      routeReservation &&
+      (!isCurrentSandboxInferenceRouteReservation(
+        routeReservation,
+        data.sandboxes[entry.name] ?? null,
+      ) ||
+        !sandboxRegistrationMatchesInferenceRouteReservation(entry, routeReservation))
+    ) {
+      throw new Error("Cannot register a sandbox after its inference route reservation changed");
+    }
     const servingProfileProvenance = parseServingProfileProvenance(entry.servingProfileProvenance);
     if (entry.servingProfileProvenance !== undefined && !servingProfileProvenance) {
       throw new Error("Cannot register a sandbox with invalid serving profile provenance");
@@ -175,7 +204,7 @@ export function registerSandbox(entry: SandboxEntry): void {
         );
       }
     }
-    data.sandboxes[entry.name] = {
+    const registered: SandboxEntry = {
       name: entry.name,
       createdAt: entry.createdAt || new Date().toISOString(),
       servingProfileProvenance: servingProfileProvenance ?? undefined,
@@ -254,10 +283,12 @@ export function registerSandbox(entry: SandboxEntry): void {
       gatewayName: entry.gatewayName ?? undefined,
       gatewayPort: entry.gatewayPort ?? undefined,
     };
+    data.sandboxes[entry.name] = registered;
     // Registration establishes a new sandbox lifecycle and may not inherit a
     // deep-off readiness record carried from a previous same-named row.
     discardOpaqueCuaRuntimeReadiness(data, entry.name);
     save(reversibleRemoval.claimInitialDefaultInRegistry(data, entry.name));
+    return structuredClone(registered);
   });
 }
 
@@ -357,31 +388,6 @@ export function reserveSandboxInferenceRoute(
     save(data);
     return true;
   });
-}
-
-/**
- * True only for an inference route reserved before sandbox registration.
- *
- * Structural parameter (only the two fields it reads) so display-layer entry
- * types that omit the rest of the durable registry shape can reuse this single
- * source of truth instead of re-deriving the predicate (#7609).
- */
-export function isRouteOnlySandboxReservation(entry: {
-  pendingRouteReservation?: true;
-  createdAt?: string;
-}): boolean {
-  return entry.pendingRouteReservation === true && entry.createdAt === undefined;
-}
-
-export function isPendingReservationForSession(
-  entry: SandboxEntry | null,
-  sessionId: string | null | undefined,
-): boolean {
-  return (
-    entry?.pendingRouteReservation === true &&
-    Boolean(sessionId) &&
-    entry.reservationSessionId === sessionId
-  );
 }
 
 const HOST_LOCAL_INFERENCE_LIFECYCLE_AUTHORITY_FIELDS = new Set<keyof SandboxEntry>([
