@@ -116,12 +116,15 @@ describe("managed vLLM serving-port guard (#8685)", () => {
       reason: `lsof reports python3 (PID 4242) listening on port ${String(port)}`,
     }));
 
-    const result = await installVllm(profile, {
-      hasImage: true,
-      nonInteractive: true,
-      promptFn,
-      checkServingPort,
-    });
+    const result = await installVllm(
+      profile,
+      withVllmInstallTestReadiness(profile, {
+        hasImage: true,
+        nonInteractive: true,
+        promptFn,
+        checkServingPort,
+      }),
+    );
 
     expect(result).toEqual({ ok: false });
     expect(checkServingPort).toHaveBeenCalledWith(8000);
@@ -239,12 +242,15 @@ describe("managed vLLM serving-port guard (#8685)", () => {
     const profile = detectVllmProfile({ platform: "spark", type: "nvidia" })!;
     mockSuccessfulVllmInstall(mocks, profile.containerName);
 
-    const result = await installVllm(profile, {
-      hasImage: true,
-      nonInteractive: true,
-      promptFn: vi.fn<(q: string) => Promise<string>>(),
-      checkServingPort: async () => ({ ok: false, reason: "port 8000 is held" }),
-    });
+    const result = await installVllm(
+      profile,
+      withVllmInstallTestReadiness(profile, {
+        hasImage: true,
+        nonInteractive: true,
+        promptFn: vi.fn<(q: string) => Promise<string>>(),
+        checkServingPort: async () => ({ ok: false, reason: "port 8000 is held" }),
+      }),
+    );
 
     // The storage probes are the first step that can prompt, and the cache
     // directory is created immediately after them. Neither may run for a
@@ -261,13 +267,16 @@ describe("managed vLLM serving-port guard (#8685)", () => {
     mockSuccessfulVllmInstall(mocks, profile.containerName);
     const beforeInstall = vi.fn();
 
-    const result = await installVllm(profile, {
-      hasImage: true,
-      nonInteractive: true,
-      promptFn: vi.fn<(q: string) => Promise<string>>(),
-      beforeInstall,
-      checkServingPort: async () => ({ ok: false, reason: "port 8000 is held" }),
-    });
+    const result = await installVllm(
+      profile,
+      withVllmInstallTestReadiness(profile, {
+        hasImage: true,
+        nonInteractive: true,
+        promptFn: vi.fn<(q: string) => Promise<string>>(),
+        beforeInstall,
+        checkServingPort: async () => ({ ok: false, reason: "port 8000 is held" }),
+      }),
+    );
 
     expect(result).toEqual({ ok: false });
     expect(mocks.ensureDualStationVllmApiKey).not.toHaveBeenCalled();
@@ -280,12 +289,15 @@ describe("managed vLLM serving-port guard (#8685)", () => {
     mockSuccessfulVllmInstall(mocks, profile.containerName);
     const checkServingPort = vi.fn(async () => ({ ok: true }));
 
-    await installVllm(profile, {
-      hasImage: true,
-      nonInteractive: true,
-      promptFn: vi.fn<(q: string) => Promise<string>>(),
-      checkServingPort,
-    });
+    await installVllm(
+      profile,
+      withVllmInstallTestReadiness(profile, {
+        hasImage: true,
+        nonInteractive: true,
+        promptFn: vi.fn<(q: string) => Promise<string>>(),
+        checkServingPort,
+      }),
+    );
 
     expect(checkServingPort).toHaveBeenCalledWith(8000);
     expect(mocks.dockerPullWithProgressWatchdog).toHaveBeenCalled();
@@ -296,11 +308,14 @@ describe("managed vLLM serving-port guard (#8685)", () => {
     const profile = detectVllmProfile({ platform: "spark", type: "nvidia" })!;
     mockSuccessfulVllmInstall(mocks, profile.containerName);
 
-    const result = await installVllm(profile, {
-      hasImage: true,
-      nonInteractive: true,
-      promptFn: vi.fn<(q: string) => Promise<string>>(),
-    });
+    const result = await installVllm(
+      profile,
+      withVllmInstallTestReadiness(profile, {
+        hasImage: true,
+        nonInteractive: true,
+        promptFn: vi.fn<(q: string) => Promise<string>>(),
+      }),
+    );
 
     // Assert the install reaches the end, so an early return added ahead of the
     // guard cannot pass this case by merely staying silent.
