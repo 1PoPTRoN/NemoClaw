@@ -93,7 +93,7 @@ function triggeredBy(relativePath: string): string[] {
 
 describe("Vitest opaque-input watch triggers", () => {
   it.each([".github/workflows/release-lkg-brev-image.yaml", "scripts/release-lkg-brev-image.sh"])(
-    "maps each LKG image caller input to its contract test [%s] (#9661)",
+    "maps each LKG image caller input to its contract test [%s] (#9798)",
     (inputPath) => {
       expect(triggeredBy(inputPath)).toEqual(["test/release-lkg-brev-image.test.ts"]);
     },
